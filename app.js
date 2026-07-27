@@ -186,7 +186,7 @@ function setupPreviewSizing() {
 function updatePreviewScale() {
     const stage = document.querySelector('.paper-stage');
     const paper = document.getElementById('pdfPaper');
-    if (!stage || !paper || paper.hidden || window.innerWidth <= 1100) {
+    if (!stage || !paper || paper.hidden || window.innerWidth <= 1200) {
         paper?.classList.remove('is-preview-scaled');
         paper?.style.removeProperty('--preview-scale');
         if (stage) stage.style.height = '';
