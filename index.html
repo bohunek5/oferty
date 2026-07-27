@@ -33,7 +33,7 @@
             <div>
                 <p class="eyebrow">PRESCOT LED</p>
                 <h1>Pozycje z oferty, dokładnie tak jak w pliku</h1>
-                <p>Wgraj PDF. Aplikacja przepisze wyłącznie wiersze tabeli: numer, nazwę, indeks, ilość, jednostkę, ceny, rabat i wartość netto.</p>
+                <p>Wgraj PDF z tabelą. Aplikacja wyszuka pozycje, dopasuje popularne nazwy kolumn i przygotuje je do edycji.</p>
             </div>
             <div class="import-summary" aria-live="polite">
                 <span id="importStateDot" class="status-dot"></span>
@@ -50,7 +50,7 @@
                     <span class="step">1</span>
                     <div>
                         <h2>Wgraj ofertę PDF</h2>
-                        <p>Obsługiwane są tabelaryczne oferty z systemu SAP.</p>
+                        <p>Plik musi zawierać tekst. Sam skan bez warstwy tekstowej wymaga OCR.</p>
                     </div>
                 </div>
 
@@ -75,11 +75,25 @@
                     <span class="step">2</span>
                     <div>
                         <h2>Dane nowej oferty</h2>
-                        <p>Te pola można uzupełnić niezależnie od importowanych pozycji.</p>
+                        <p>Wybierz dokument z danymi albo pusty formularz do uzupełnienia długopisem.</p>
                     </div>
                 </div>
 
-                <div class="form-grid">
+                <fieldset class="data-mode">
+                    <legend>Czy wypełnić dane na dokumencie?</legend>
+                    <div class="data-mode-options">
+                        <label class="data-mode-option">
+                            <input type="radio" name="documentDataMode" value="filled" checked>
+                            <span><strong>Uzupełniam dane</strong><small>Pokaż pola i wpisane informacje w PDF-ie.</small></span>
+                        </label>
+                        <label class="data-mode-option">
+                            <input type="radio" name="documentDataMode" value="blank">
+                            <span><strong>Pusty formularz</strong><small>Zostaw ramki i linie do wpisania ręcznie.</small></span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <div id="offerDataFields" class="form-grid">
                     <label>
                         <span>Numer oferty</span>
                         <input type="text" id="offerNumber" value="OF/2026/07/001">
@@ -214,12 +228,20 @@
             <div class="paper-stage">
                 <article id="pdfPaper" class="pdf-paper">
                     <header class="document-header">
-                        <div>
+                        <div class="document-filled-only">
                             <p class="document-kicker">PRESCOT LED</p>
                             <h1>Oferta handlowa</h1>
                             <p id="docOfferNumber" class="document-number">OF/2026/07/001</p>
                         </div>
-                        <div class="document-logo" aria-label="Prescot LED"><strong>PRESCOT</strong><b>LED</b></div>
+                        <div class="document-logo document-filled-only" aria-label="Prescot LED"><strong>PRESCOT</strong><b>LED</b></div>
+                        <div class="document-blank-header document-blank-only">
+                            <div class="blank-logo-box"><span>Logo / pieczęć</span></div>
+                            <div class="blank-header-fields">
+                                <div><span>Numer oferty</span></div>
+                                <div><span>Data wystawienia</span></div>
+                                <div><span>Ważna do</span></div>
+                            </div>
+                        </div>
                     </header>
 
                     <div class="document-meta">
@@ -269,6 +291,11 @@
                         <div><strong>Prescot Sp. z o.o.</strong><span>Dziękujemy za zainteresowanie ofertą.</span></div>
                         <div class="signature"><span></span><small>Podpis i pieczęć</small></div>
                     </footer>
+
+                    <div class="document-blank-footer document-blank-only">
+                        <div><span>Warunki płatności / uwagi</span></div>
+                        <div><span>Podpis / pieczęć</span></div>
+                    </div>
                 </article>
             </div>
         </section>

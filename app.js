@@ -17,6 +17,17 @@ const DOCUMENT_COLUMNS = [
     { key: 'netPrice', label: 'Netto po rabacie', weight: 11, align: 'number' },
     { key: 'netTotal', label: 'Wartość netto', weight: 11, align: 'number' }
 ];
+const FLEXIBLE_HEADER_ALIASES = {
+    position: ['lp', 'poz', 'pozycja', 'nr', 'numer'],
+    name: ['nazwa', 'opis', 'produkt', 'towar', 'usluga', 'asortyment', 'nazwatowaru', 'nazwaproduktu'],
+    catalogIndex: ['indeks', 'kod', 'sku', 'symbol', 'nrkatalogowy', 'indekskatalogowy', 'kodproduktu'],
+    qty: ['ilosc', 'qty', 'liczba'],
+    unit: ['jm', 'jedn', 'jednostka', 'jednostkamiary'],
+    catalogNetPrice: ['cenakatalogowa', 'cenacennikowa'],
+    discountPercent: ['rabat', 'rabatprocent', 'upust', 'upustprocent'],
+    netPrice: ['cena', 'cenanetto', 'cenajednostkowa', 'cenajednostkowanetto', 'nettoporabacie', 'cenaporabacie'],
+    netTotal: ['wartosc', 'wartoscnetto', 'razem', 'razemnetto', 'suma', 'sumanetto', 'wartoscbrutto']
+};
 let nextItemId = 1;
 
 const state = {
@@ -25,6 +36,7 @@ const state = {
     sourcePageCount: 0,
     marginPercent: 0,
     vatPercent: 23,
+    documentDataMode: 'filled',
     documentColumns: Object.fromEntries(DOCUMENT_COLUMNS.map((column) => [column.key, true])),
     meta: {
         offerNumber: 'OF/2026/07/001',
@@ -53,6 +65,7 @@ function initializeForm() {
     document.getElementById('issueDate').value = state.meta.issueDate;
     document.getElementById('validityDate').value = state.meta.validityDate;
     syncDocumentColumnControls();
+    syncDocumentDataMode();
     syncDocumentMeta();
 }
 
@@ -90,6 +103,13 @@ function setupEventListeners() {
     bindMetaInput('issueDate', 'issueDate');
     bindMetaInput('validityDate', 'validityDate');
     bindMetaInput('paymentTerms', 'paymentTerms');
+    document.querySelectorAll('input[name="documentDataMode"]').forEach((input) => {
+        input.addEventListener('change', (event) => {
+            if (!event.target.checked) return;
+            state.documentDataMode = event.target.value;
+            syncDocumentDataMode();
+        });
+    });
 
     document.getElementById('vatPercent').addEventListener('input', (event) => {
         state.vatPercent = safeNumber(event.target.value, 0);
@@ -141,6 +161,12 @@ function syncDocumentMeta() {
     document.getElementById('docIssueDate').textContent = formatDate(state.meta.issueDate);
     document.getElementById('docValidityDate').textContent = formatDate(state.meta.validityDate);
     document.getElementById('docPaymentTerms').textContent = state.meta.paymentTerms || '-';
+}
+
+function syncDocumentDataMode() {
+    const isBlank = state.documentDataMode === 'blank';
+    document.getElementById('offerDataFields').hidden = isBlank;
+    document.getElementById('pdfPaper').classList.toggle('is-blank-form', isBlank);
 }
 
 async function handlePdfFile(file) {
@@ -214,6 +240,12 @@ async function handlePdfFile(file) {
 }
 
 function parsePageItems(pageItems, pageWidth, pageNumber) {
+    const exactRows = parseSapPageItems(pageItems, pageWidth, pageNumber);
+    if (exactRows.length) return exactRows;
+    return parseFlexiblePageItems(pageItems, pageWidth, pageNumber);
+}
+
+function parseSapPageItems(pageItems, pageWidth, pageNumber) {
     const normalizedItems = pageItems.map((item) => ({
         ...item,
         normalized: normalizeLabel(item.str)
@@ -280,6 +312,165 @@ function parsePageItems(pageItems, pageWidth, pageNumber) {
     });
 
     return rows;
+}
+
+function parseFlexiblePageItems(pageItems, pageWidth, pageNumber) {
+    const normalizedItems = pageItems.map((item) => ({
+        ...item,
+        normalized: normalizeLabel(item.str),
+        headerKey: identifyFlexibleHeader(item.str)
+    }));
+    const headerGroups = [];
+
+    normalizedItems
+        .filter((item) => item.headerKey)
+        .sort((a, b) => b.y - a.y)
+        .forEach((item) => {
+            let group = headerGroups.find((candidate) => Math.abs(candidate.y - item.y) <= 8);
+            if (!group) {
+                group = { y: item.y, items: [] };
+                headerGroups.push(group);
+            }
+            group.items.push(item);
+        });
+
+    const headerGroup = headerGroups
+        .map((group) => ({
+            ...group,
+            keys: new Set(group.items.map((item) => item.headerKey))
+        }))
+        .filter((group) =>
+            group.keys.has('position') &&
+            group.keys.has('name') &&
+            (group.keys.has('qty') || group.keys.has('netPrice') || group.keys.has('netTotal'))
+        )
+        .sort((a, b) => b.keys.size - a.keys.size)[0];
+    if (!headerGroup) return [];
+
+    const uniqueColumns = [];
+    [...headerGroup.items]
+        .sort((a, b) => a.x - b.x)
+        .forEach((item) => {
+            if (!uniqueColumns.some((column) => column.key === item.headerKey)) {
+                uniqueColumns.push({ key: item.headerKey, x: item.x });
+            }
+        });
+    if (uniqueColumns.length < 3) return [];
+
+    const tableLeft = Math.max(0, uniqueColumns[0].x - 5);
+    const tableRight = pageWidth - tableLeft;
+    const boundaries = uniqueColumns.slice(0, -1).map((column, index) =>
+        (column.x + uniqueColumns[index + 1].x) / 2
+    );
+    const firstColumnEnd = boundaries[0] || tableLeft + 35;
+    const headerY = headerGroup.y;
+    const rowStarts = normalizedItems
+        .filter((item) =>
+            /^\d{1,4}[.)]?$/.test(item.str) &&
+            item.x >= tableLeft - 3 &&
+            item.x < firstColumnEnd &&
+            item.y < headerY - 4 &&
+            item.y > 24
+        )
+        .sort((a, b) => b.y - a.y);
+    const uniqueStarts = rowStarts.filter((item, index, list) =>
+        index === 0 || Math.abs(item.y - list[index - 1].y) > 2
+    );
+    if (!uniqueStarts.length) return [];
+
+    const stopYs = normalizedItems
+        .filter((item) =>
+            /^(razem|suma|netto|brutto|wartoscslownie|doplaty)$/.test(item.normalized) ||
+            item.normalized.startsWith('wydrukowano') ||
+            item.normalized.startsWith('strona')
+        )
+        .map((item) => item.y);
+
+    return uniqueStarts.map((start, index) => {
+        const nextStart = uniqueStarts[index + 1];
+        const closestSummary = Math.max(24, ...stopYs.filter((y) => y < start.y));
+        const bottomY = nextStart ? nextStart.y + 2 : closestSummary + 2;
+        const topY = start.y + Math.max(3, start.height * 0.5);
+        const rowItems = pageItems.filter((item) =>
+            item.y <= topY &&
+            item.y > bottomY &&
+            item.x >= tableLeft - 3 &&
+            item.x <= tableRight + 3
+        );
+        return parseFlexibleRowItems(rowItems, uniqueColumns, boundaries, pageNumber);
+    }).filter(Boolean);
+}
+
+function identifyFlexibleHeader(value) {
+    const normalized = normalizeLabel(value);
+    return Object.entries(FLEXIBLE_HEADER_ALIASES)
+        .find(([, aliases]) => aliases.includes(normalized))?.[0] || '';
+}
+
+function parseFlexibleRowItems(rowItems, columns, boundaries, pageNumber) {
+    const cellItems = Object.fromEntries(columns.map((column) => [column.key, []]));
+    rowItems.forEach((item) => {
+        let columnIndex = boundaries.findIndex((boundary) => item.x < boundary);
+        if (columnIndex === -1) columnIndex = columns.length - 1;
+        const column = columns[columnIndex];
+        if (column) cellItems[column.key].push(item);
+    });
+    const values = Object.fromEntries(
+        Object.entries(cellItems).map(([key, items]) => [key, joinCellItems(items)])
+    );
+
+    const position = parseInt(values.position, 10);
+    const name = cleanCellText(values.name);
+    const qty = safeNumber(parseNumber(values.qty), 1);
+    const discountPercent = safeNumber(parseNumber(values.discountPercent), 0);
+    let catalogNetPrice = parseNumber(values.catalogNetPrice);
+    let netPrice = parseNumber(values.netPrice);
+    let netTotal = parseNumber(values.netTotal);
+
+    if (!Number.isFinite(netPrice) && Number.isFinite(catalogNetPrice)) {
+        netPrice = roundMoney(catalogNetPrice * (1 - discountPercent / 100));
+    }
+    if (!Number.isFinite(netPrice) && Number.isFinite(netTotal) && qty) {
+        netPrice = roundMoney(netTotal / qty);
+    }
+    if (!Number.isFinite(catalogNetPrice) && Number.isFinite(netPrice)) {
+        catalogNetPrice = discountPercent < 100
+            ? roundMoney(netPrice / (1 - discountPercent / 100))
+            : netPrice;
+    }
+    if (!Number.isFinite(netTotal) && Number.isFinite(netPrice)) {
+        netTotal = roundMoney(qty * netPrice);
+    }
+
+    if (
+        !Number.isFinite(position) ||
+        !name ||
+        !Number.isFinite(netPrice) ||
+        !Number.isFinite(netTotal)
+    ) {
+        return null;
+    }
+
+    return {
+        id: nextItemId++,
+        position,
+        name,
+        catalogIndex: cleanCellText(values.catalogIndex),
+        qty,
+        unit: cleanCellText(values.unit) || 'szt.',
+        catalogNetPrice,
+        discountPercent,
+        netPrice,
+        netTotal,
+        preserveTotal: true,
+        sourcePage: pageNumber,
+        original: {
+            catalogNetPrice,
+            discountPercent,
+            netPrice,
+            netTotal
+        }
+    };
 }
 
 function parseRowItems(rowItems, tableLeft, tableWidth, pageNumber) {
