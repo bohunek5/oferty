@@ -671,7 +671,7 @@ function updateSourceLabels() {
     docCount.textContent = `${state.items.length} pozycji`;
 }
 
-function generatePDF() {
+async function generatePDF() {
     if (!state.items.length) {
         window.alert('Dodaj lub wczytaj przynajmniej jedną pozycję.');
         return;
@@ -682,20 +682,26 @@ function generatePDF() {
     }
 
     const paper = document.getElementById('pdfPaper');
+    const downloadButton = document.getElementById('btnGeneratePDF');
+    const originalButtonText = downloadButton.textContent;
     const filenamePart = (state.meta.offerNumber || 'oferta')
         .replace(/[^\p{L}\p{N}_-]+/gu, '_')
         .replace(/^_+|_+$/g, '');
     paper.classList.add('is-exporting');
+    downloadButton.disabled = true;
+    downloadButton.textContent = 'Tworzę PDF…';
 
-    const options = {
+    const baseOptions = {
         margin: 0,
         filename: `Oferta_Prescot_${filenamePart || 'oferta'}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: {
-            scale: 2,
             useCORS: true,
             logging: false,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            removeContainer: true,
+            scrollX: 0,
+            scrollY: 0
         },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: {
@@ -704,11 +710,93 @@ function generatePDF() {
         }
     };
 
-    window.html2pdf()
-        .set(options)
-        .from(paper)
-        .save()
-        .finally(() => paper.classList.remove('is-exporting'));
+    try {
+        if (document.fonts?.ready) await document.fonts.ready;
+        await waitForPaint();
+
+        let saved = false;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            if (attempt === 1) await waitForPaint(180);
+
+            const options = {
+                ...baseOptions,
+                html2canvas: {
+                    ...baseOptions.html2canvas,
+                    scale: attempt === 0 ? 2 : 1.5
+                }
+            };
+            const worker = window.html2pdf()
+                .set(options)
+                .from(paper)
+                .toContainer()
+                .toCanvas();
+            const canvas = await worker.get('canvas');
+
+            if (!canvasHasVisibleContent(canvas)) {
+                releaseCanvas(canvas);
+                continue;
+            }
+
+            await worker.toPdf().save();
+            releaseCanvas(canvas);
+            saved = true;
+            break;
+        }
+
+        if (!saved) {
+            throw new Error('Generator dwukrotnie utworzył pusty obraz dokumentu.');
+        }
+    } catch (error) {
+        console.error('Błąd eksportu PDF:', error);
+        window.alert('Nie udało się utworzyć PDF-u. Dokument nie został pobrany. Spróbuj ponownie.');
+    } finally {
+        paper.classList.remove('is-exporting');
+        downloadButton.disabled = false;
+        downloadButton.textContent = originalButtonText;
+    }
+}
+
+function canvasHasVisibleContent(canvas) {
+    if (!canvas?.width || !canvas?.height) return false;
+
+    const sample = document.createElement('canvas');
+    sample.width = 80;
+    sample.height = 80;
+    const context = sample.getContext('2d', { willReadFrequently: true });
+    if (!context) return false;
+
+    context.drawImage(canvas, 0, 0, sample.width, sample.height);
+    const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
+    let visiblePixels = 0;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+        const red = pixels[index];
+        const green = pixels[index + 1];
+        const blue = pixels[index + 2];
+        const alpha = pixels[index + 3];
+        if (alpha > 0 && (red < 248 || green < 248 || blue < 248)) {
+            visiblePixels += 1;
+            if (visiblePixels >= 8) return true;
+        }
+    }
+    return false;
+}
+
+function releaseCanvas(canvas) {
+    if (!canvas) return;
+    canvas.width = 1;
+    canvas.height = 1;
+}
+
+function waitForPaint(delay = 0) {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (delay) window.setTimeout(resolve, delay);
+                else resolve();
+            });
+        });
+    });
 }
 
 function roundMoney(value) {
