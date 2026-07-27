@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prescot - Ogarniacz ofert PDF</title>
+    <meta name="description" content="Import pozycji z ofert PDF, edycja 1:1 i eksport nowej oferty.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-inner">
+            <a class="brand" href="#top" aria-label="Prescot - początek strony">
+                <span class="brand-logo"><img src="prescot-logo.svg" alt="Prescot"></span>
+                <span class="brand-copy">
+                    <strong>Oferty</strong>
+                </span>
+            </a>
+            <div class="header-actions">
+                <button id="btnScrollToPreview" class="button button-secondary" type="button">Podgląd oferty</button>
+                <button id="btnGeneratePDF" class="button button-primary" type="button">Pobierz gotowy PDF</button>
+            </div>
+        </div>
+    </header>
+
+    <main id="top" class="workspace">
+        <section class="intro">
+            <div>
+                <p class="eyebrow">PRESCOT LED</p>
+                <h1>Pozycje z oferty, dokładnie tak jak w pliku</h1>
+                <p>Wgraj PDF. Aplikacja przepisze wyłącznie wiersze tabeli: numer, nazwę, indeks, ilość, jednostkę, ceny, rabat i wartość netto.</p>
+            </div>
+            <div class="import-summary" aria-live="polite">
+                <span id="importStateDot" class="status-dot"></span>
+                <div>
+                    <strong id="importStateTitle">Czekam na plik</strong>
+                    <span id="importStateDetail">PDF nie został jeszcze wczytany</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="top-grid">
+            <article class="panel upload-panel">
+                <div class="panel-heading">
+                    <span class="step">1</span>
+                    <div>
+                        <h2>Wgraj ofertę PDF</h2>
+                        <p>Obsługiwane są tabelaryczne oferty z systemu SAP.</p>
+                    </div>
+                </div>
+
+                <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Wybierz lub upuść plik PDF">
+                    <input type="file" id="pdfInput" accept="application/pdf,.pdf" hidden>
+                    <span class="upload-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <strong>Upuść PDF tutaj</strong>
+                    <span>albo kliknij, aby wybrać plik</span>
+                    <span id="fileNameDisplay" class="file-name" hidden></span>
+                </div>
+
+                <div id="parsingStatus" class="parse-status" hidden>
+                    <span class="spinner" aria-hidden="true"></span>
+                    <span id="parsingStatusText">Analizuję pozycje…</span>
+                </div>
+            </article>
+
+            <article class="panel">
+                <div class="panel-heading">
+                    <span class="step">2</span>
+                    <div>
+                        <h2>Dane nowej oferty</h2>
+                        <p>Te pola można uzupełnić niezależnie od importowanych pozycji.</p>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <label>
+                        <span>Numer oferty</span>
+                        <input type="text" id="offerNumber" value="OF/2026/07/001">
+                    </label>
+                    <label>
+                        <span>Nazwa odbiorcy</span>
+                        <input type="text" id="recipientName" placeholder="Firma XYZ Sp. z o.o.">
+                    </label>
+                    <label>
+                        <span>NIP odbiorcy</span>
+                        <input type="text" id="recipientNip" placeholder="np. 5213876543">
+                    </label>
+                    <label>
+                        <span>Adres odbiorcy</span>
+                        <input type="text" id="recipientAddress" placeholder="ul. Przemysłowa 12, Warszawa">
+                    </label>
+                    <label>
+                        <span>Data wystawienia</span>
+                        <input type="date" id="issueDate">
+                    </label>
+                    <label>
+                        <span>Termin ważności</span>
+                        <input type="date" id="validityDate">
+                    </label>
+                    <label>
+                        <span>Warunki płatności</span>
+                        <input type="text" id="paymentTerms" value="Przelew 14 dni">
+                    </label>
+                    <label>
+                        <span>VAT do podsumowania</span>
+                        <div class="input-suffix"><input type="number" id="vatPercent" value="23" min="0" max="100" step="1"><b>%</b></div>
+                    </label>
+                </div>
+            </article>
+        </section>
+
+        <section class="price-tools panel">
+            <div>
+                <p class="eyebrow">Opcjonalnie</p>
+                <h2>Zmień ceny po imporcie</h2>
+                <p>Po wgraniu pliku marża wynosi 0%, więc wartości pozostają 1:1. Zmiana jest wykonywana dopiero po kliknięciu.</p>
+            </div>
+            <div class="price-actions">
+                <label class="compact-field">
+                    <span>Zmiana ceny</span>
+                    <div class="input-suffix"><input type="number" id="marginPercent" value="0" min="-100" max="500" step="0.1"><b>%</b></div>
+                </label>
+                <button id="btnApplyMargin" class="button button-primary" type="button">Przelicz ceny</button>
+                <button id="btnResetPrices" class="button button-secondary" type="button">Przywróć z PDF</button>
+            </div>
+        </section>
+
+        <section class="panel editor-panel">
+            <div class="panel-heading panel-heading-row">
+                <div class="heading-with-step">
+                    <span class="step">3</span>
+                    <div>
+                        <h2>Pozycje oferty</h2>
+                        <p>Każda komórka jest edytowalna. Wybierz też, które kolumny mają trafić do dokumentu.</p>
+                    </div>
+                </div>
+                <div class="table-actions">
+                    <span id="itemsCountBadge" class="count-badge">0 pozycji</span>
+                    <button id="btnAddRow" class="button button-secondary button-small" type="button">+ Dodaj pozycję</button>
+                    <button id="btnClearTable" class="button button-danger button-small" type="button">Wyczyść</button>
+                </div>
+            </div>
+
+            <div class="column-picker">
+                <div class="column-picker-heading">
+                    <div>
+                        <strong>Kolumny w dokumencie</strong>
+                        <span>Odznaczona kolumna nie pojawi się w podglądzie ani w PDF-ie.</span>
+                    </div>
+                    <span id="visibleColumnsCount" class="column-count">9 z 9 widocznych</span>
+                </div>
+                <div id="documentColumnOptions" class="column-options">
+                    <label class="column-option"><input type="checkbox" data-document-column="position" checked><span>Lp.</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="name" checked><span>Nazwa</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="catalogIndex" checked><span>Indeks katalogowy</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="qty" checked><span>Ilość</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="unit" checked><span>Jm</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="catalogNetPrice" checked><span>Cena netto</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="discountPercent" checked><span>Mój rabat</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="netPrice" checked><span>Netto po rabacie</span></label>
+                    <label class="column-option"><input type="checkbox" data-document-column="netTotal" checked><span>Wartość netto</span></label>
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table class="editor-table">
+                    <thead>
+                        <tr>
+                            <th class="col-lp">Lp.</th>
+                            <th class="col-name">Nazwa</th>
+                            <th class="col-index">Indeks katalogowy</th>
+                            <th class="col-qty">Ilość</th>
+                            <th class="col-unit">Jm</th>
+                            <th class="col-money">Cena netto</th>
+                            <th class="col-discount">Rabat %</th>
+                            <th class="col-money">Netto po rabacie</th>
+                            <th class="col-money">Wartość netto</th>
+                            <th class="col-remove" aria-label="Usuń"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="itemsTableBody"></tbody>
+                </table>
+            </div>
+
+            <div class="editor-footer">
+                <div class="source-note">
+                    <strong id="sourceFileLabel">Brak wczytanego źródła</strong>
+                    <span id="sourceFileMeta">Wgraj plik, aby rozpocząć.</span>
+                </div>
+                <div class="summary-box">
+                    <div><span>Suma netto</span><strong id="summaryNetto">0,00 PLN</strong></div>
+                    <div><span>VAT</span><strong id="summaryVat">0,00 PLN</strong></div>
+                    <div class="summary-total"><span>Suma brutto</span><strong id="summaryBrutto">0,00 PLN</strong></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="previewSection" class="preview-section">
+            <div class="section-title">
+                <div>
+                    <p class="eyebrow">Podgląd eksportu</p>
+                    <h2>Gotowa oferta handlowa</h2>
+                </div>
+                <span>Dokument poniżej zostanie zapisany jako PDF.</span>
+            </div>
+
+            <div class="paper-stage">
+                <article id="pdfPaper" class="pdf-paper">
+                    <header class="document-header">
+                        <div>
+                            <p class="document-kicker">PRESCOT LED</p>
+                            <h1>Oferta handlowa</h1>
+                            <p id="docOfferNumber" class="document-number">OF/2026/07/001</p>
+                        </div>
+                        <div class="document-logo" aria-label="Prescot LED"><strong>PRESCOT</strong><b>LED</b></div>
+                    </header>
+
+                    <div class="document-meta">
+                        <div>
+                            <span>Wystawiający</span>
+                            <strong>Prescot Sp. z o.o.</strong>
+                            <p>NIP: 8451939947 · REGON: 280351610</p>
+                            <p>KRS: 0000319434 · Kapitał: 200 000 zł</p>
+                        </div>
+                        <div>
+                            <span>Nabywca</span>
+                            <strong id="docRecipientName">Brak danych odbiorcy</strong>
+                            <p id="docRecipientNip">NIP: -</p>
+                            <p id="docRecipientAddress"></p>
+                        </div>
+                        <div class="document-dates">
+                            <p>Data: <strong id="docIssueDate"></strong></p>
+                            <p>Ważna do: <strong id="docValidityDate"></strong></p>
+                        </div>
+                    </div>
+
+                    <div class="document-source">
+                        <span id="docSourceFile">Pozycje wprowadzone ręcznie</span>
+                        <strong id="docImportedCount">0 pozycji</strong>
+                    </div>
+
+                    <table class="document-table">
+                        <colgroup id="docItemsTableColumns"></colgroup>
+                        <thead>
+                            <tr id="docItemsTableHead"></tr>
+                        </thead>
+                        <tbody id="docItemsTableBody"></tbody>
+                    </table>
+
+                    <div class="document-summary">
+                        <div><span>Razem netto</span><strong id="docSummaryNetto">0,00 PLN</strong></div>
+                        <div><span>VAT <b id="docVatPercent">23</b>%</span><strong id="docSummaryVat">0,00 PLN</strong></div>
+                        <div class="document-total"><span>Razem brutto</span><strong id="docSummaryBrutto">0,00 PLN</strong></div>
+                    </div>
+
+                    <div class="document-terms">
+                        <p><strong>Słownie:</strong> <span id="docTotalInWords">zero złotych 00/100</span></p>
+                        <p><strong>Warunki płatności:</strong> <span id="docPaymentTerms">Przelew 14 dni</span></p>
+                    </div>
+
+                    <footer class="document-footer">
+                        <div><strong>Prescot Sp. z o.o.</strong><span>Dziękujemy za zainteresowanie ofertą.</span></div>
+                        <div class="signature"><span></span><small>Podpis i pieczęć</small></div>
+                    </footer>
+                </article>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
