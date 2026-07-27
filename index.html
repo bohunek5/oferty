@@ -22,7 +22,18 @@
                     <strong>Oferty</strong>
                 </span>
             </a>
+            <div class="header-title">
+                <h1>Pozycje z oferty, dokładnie tak jak w pliku</h1>
+                <p>Wgraj PDF z tabelą, edytuj pozycje i przygotuj gotową ofertę.</p>
+            </div>
             <div class="header-actions">
+                <div class="import-summary" aria-live="polite">
+                    <span id="importStateDot" class="status-dot"></span>
+                    <div>
+                        <strong id="importStateTitle">Czekam na plik</strong>
+                        <span id="importStateDetail">PDF nie został jeszcze wczytany</span>
+                    </div>
+                </div>
                 <button id="btnScrollToPreview" class="button button-secondary" type="button">Podgląd oferty</button>
                 <button id="btnGeneratePDF" class="button button-primary" type="button">Pobierz gotowy PDF</button>
             </div>
@@ -30,21 +41,6 @@
     </header>
 
     <main id="top" class="workspace">
-        <section class="intro">
-            <div>
-                <p class="eyebrow">PRESCOT LED</p>
-                <h1>Pozycje z oferty, dokładnie tak jak w pliku</h1>
-                <p>Wgraj PDF z tabelą. Aplikacja wyszuka pozycje, dopasuje popularne nazwy kolumn i przygotuje je do edycji.</p>
-            </div>
-            <div class="import-summary" aria-live="polite">
-                <span id="importStateDot" class="status-dot"></span>
-                <div>
-                    <strong id="importStateTitle">Czekam na plik</strong>
-                    <span id="importStateDetail">PDF nie został jeszcze wczytany</span>
-                </div>
-            </div>
-        </section>
-
         <div class="application-layout">
         <div class="controls-column">
         <section class="top-grid">
