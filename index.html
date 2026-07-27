@@ -146,6 +146,7 @@
             </div>
         </section>
 
+        <div class="editor-preview-layout">
         <section class="panel editor-panel">
             <div class="panel-heading panel-heading-row">
                 <div class="heading-with-step">
@@ -226,7 +227,12 @@
             </div>
 
             <div class="paper-stage">
-                <article id="pdfPaper" class="pdf-paper">
+                <div id="previewPlaceholder" class="preview-placeholder">
+                    <span class="preview-placeholder-icon" aria-hidden="true">PDF</span>
+                    <strong>Tutaj pojawi się podgląd oferty</strong>
+                    <span>Wgraj PDF albo dodaj pierwszą pozycję.</span>
+                </div>
+                <article id="pdfPaper" class="pdf-paper" hidden>
                     <header class="document-header">
                         <div class="document-filled-only">
                             <p class="document-kicker">PRESCOT LED</p>
@@ -299,6 +305,7 @@
                 </article>
             </div>
         </section>
+        </div>
     </main>
 
     <script src="app.js"></script>

@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeForm();
     setupEventListeners();
     updateCalculations();
+    setupPreviewSizing();
     window.__offerAgent = {
         state,
         parsePageItems,
@@ -167,6 +168,36 @@ function syncDocumentDataMode() {
     const isBlank = state.documentDataMode === 'blank';
     document.getElementById('offerDataFields').hidden = isBlank;
     document.getElementById('pdfPaper').classList.toggle('is-blank-form', isBlank);
+}
+
+function setupPreviewSizing() {
+    const stage = document.querySelector('.paper-stage');
+    const paper = document.getElementById('pdfPaper');
+    if (window.ResizeObserver) {
+        const observer = new ResizeObserver(() => updatePreviewScale());
+        observer.observe(stage);
+        observer.observe(paper);
+    }
+    window.addEventListener('resize', updatePreviewScale);
+    updatePreviewScale();
+}
+
+function updatePreviewScale() {
+    const stage = document.querySelector('.paper-stage');
+    const paper = document.getElementById('pdfPaper');
+    if (!stage || !paper || paper.hidden || window.innerWidth <= 1100) {
+        paper?.classList.remove('is-preview-scaled');
+        paper?.style.removeProperty('--preview-scale');
+        if (stage) stage.style.height = '';
+        return;
+    }
+
+    const horizontalPadding = 36;
+    const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
+    const scale = Math.min(1, availableWidth / paper.offsetWidth);
+    paper.style.setProperty('--preview-scale', String(scale));
+    paper.classList.add('is-preview-scaled');
+    stage.style.height = `${Math.ceil(paper.offsetHeight * scale + horizontalPadding)}px`;
 }
 
 async function handlePdfFile(file) {
@@ -1005,6 +1036,12 @@ function getVisibleDocumentColumns() {
 }
 
 function renderPreviewDocument() {
+    const paper = document.getElementById('pdfPaper');
+    const placeholder = document.getElementById('previewPlaceholder');
+    const hasItems = state.items.length > 0;
+    paper.hidden = !hasItems;
+    placeholder.hidden = hasItems;
+
     const visibleColumns = getVisibleDocumentColumns();
     const totalWeight = visibleColumns.reduce((sum, column) => sum + column.weight, 0);
     document.getElementById('docItemsTableColumns').innerHTML = visibleColumns
@@ -1020,6 +1057,7 @@ function renderPreviewDocument() {
             ${visibleColumns.map((column) => renderDocumentCell(column, item)).join('')}
         </tr>
     `).join('');
+    requestAnimationFrame(updatePreviewScale);
 }
 
 function renderDocumentCell(column, item) {
