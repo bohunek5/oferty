@@ -25,9 +25,10 @@ const FLEXIBLE_HEADER_ALIASES = {
     unit: ['jm', 'jedn', 'jednostka', 'jednostkamiary'],
     catalogNetPrice: ['cenakatalogowa', 'cenacennikowa'],
     discountPercent: ['rabat', 'rabatprocent', 'upust', 'upustprocent'],
-    netPrice: ['cena', 'cenanetto', 'cenajednostkowa', 'cenajednostkowanetto', 'nettoporabacie', 'cenaporabacie'],
+    netPrice: ['cena', 'netto', 'cenanetto', 'cenajednostkowa', 'cenajednostkowanetto', 'nettoporabacie', 'cenaporabacie'],
     netTotal: ['wartosc', 'wartoscnetto', 'razem', 'razemnetto', 'suma', 'sumanetto', 'wartoscbrutto']
 };
+const EMBEDDED_DATA_PREFIX = 'OFD1';
 let nextItemId = 1;
 
 const state = {
@@ -225,13 +226,14 @@ async function handlePdfFile(file) {
         const data = await file.arrayBuffer();
         const pdf = await window.pdfjsLib.getDocument({ data }).promise;
         const extractedItems = [];
+        const embeddedDataParts = [];
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
             setParsingStatus(true, `Czytam stronę ${pageNumber} z ${pdf.numPages}…`);
             const page = await pdf.getPage(pageNumber);
             const viewport = page.getViewport({ scale: 1 });
             const textContent = await page.getTextContent();
-            const pageItems = textContent.items
+            const allPageItems = textContent.items
                 .filter((item) => item.str && item.str.trim())
                 .map((item) => ({
                     str: item.str.trim(),
@@ -240,13 +242,25 @@ async function handlePdfFile(file) {
                     width: Number(item.width) || 0,
                     height: Number(item.height) || 0
                 }));
+            const pageEmbeddedParts = collectEmbeddedDataParts(allPageItems);
+            embeddedDataParts.push(...pageEmbeddedParts);
+            const pageItems = allPageItems.filter((item) => !isEmbeddedDataText(item.str));
 
-            extractedItems.push(...parsePageItems(pageItems, viewport.width, pageNumber));
+            let parsedRows = parsePageItems(pageItems, viewport.width, pageNumber);
+            if (!parsedRows.length && !pageEmbeddedParts.length) {
+                setParsingStatus(true, `Uruchamiam OCR strony ${pageNumber} z ${pdf.numPages}…`);
+                const ocrItems = await recognizePageWithOcr(page, pageNumber, pdf.numPages);
+                parsedRows = parseOcrPageItems(ocrItems, viewport.width, pageNumber);
+            }
+            extractedItems.push(...parsedRows);
         }
 
-        const items = deduplicateAndSort(extractedItems);
+        const embeddedPayload = decodeEmbeddedOfferData(embeddedDataParts);
+        const items = embeddedPayload
+            ? hydrateEmbeddedItems(embeddedPayload.items, pdf.numPages)
+            : deduplicateAndSort(extractedItems);
         if (!items.length) {
-            throw new Error('Nie znaleziono wierszy tabeli. Sprawdź, czy PDF zawiera tekst, a nie tylko obraz skanu.');
+            throw new Error('Nie znaleziono wierszy tabeli — także po próbie OCR. Sprawdź jakość i układ dokumentu.');
         }
 
         state.items = items;
@@ -254,6 +268,7 @@ async function handlePdfFile(file) {
         state.sourcePageCount = pdf.numPages;
         state.marginPercent = 0;
         document.getElementById('marginPercent').value = '0';
+        if (embeddedPayload) restoreEmbeddedDocumentState(embeddedPayload);
 
         const sequenceInfo = describeSequence(items);
         setImportStatus(
@@ -268,6 +283,258 @@ async function handlePdfFile(file) {
         setParsingStatus(true, error.message || 'Nie udało się odczytać pozycji.', true);
         setImportStatus('error', 'Import nieudany', error.message || 'Sprawdź plik i spróbuj ponownie.');
     }
+}
+
+async function recognizePageWithOcr(page, pageNumber, pageCount) {
+    if (!window.Tesseract) {
+        throw new Error('Nie udało się uruchomić OCR. Sprawdź połączenie z internetem i odśwież stronę.');
+    }
+
+    const scale = 4;
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    await page.render({ canvasContext: context, viewport }).promise;
+    const detectedGrid = removeLongTableLines(canvas, context, scale);
+
+    let lastProgress = -1;
+    const result = await window.Tesseract.recognize(
+        canvas,
+        'pol+eng',
+        {
+            logger: (message) => {
+                if (message.status !== 'recognizing text') return;
+                const progress = Math.round((message.progress || 0) * 100);
+                if (progress === lastProgress) return;
+                lastProgress = progress;
+                setParsingStatus(
+                    true,
+                    `OCR strony ${pageNumber} z ${pageCount}: ${progress}%`
+                );
+            }
+        },
+        {
+            tessedit_pageseg_mode: '6',
+            preserve_interword_spaces: '1'
+        }
+    );
+    const words = result?.data?.words || [];
+    const items = words
+        .filter((word) => word.text && word.text.trim() && word.bbox)
+        .map((word) => ({
+            str: word.text.trim(),
+            x: word.bbox.x0 / scale,
+            y: (canvas.height - word.bbox.y1) / scale,
+            width: (word.bbox.x1 - word.bbox.x0) / scale,
+            height: (word.bbox.y1 - word.bbox.y0) / scale
+        }));
+    items.gridColumns = detectedGrid.verticalLines.map((position) => position / scale);
+    releaseCanvas(canvas);
+    return items;
+}
+
+function isEmbeddedDataText(value) {
+    return String(value || '').startsWith(`${EMBEDDED_DATA_PREFIX}|`);
+}
+
+function collectEmbeddedDataParts(pageItems) {
+    const parts = [];
+    pageItems.forEach((item) => {
+        const value = String(item.str || '');
+        const match = value.match(/^OFD1\|(\d+)\|(\d+)\|([A-Za-z0-9+/=]+)$/);
+        if (!match) return;
+        parts.push({
+            index: Number(match[1]),
+            total: Number(match[2]),
+            value: match[3]
+        });
+    });
+    return parts;
+}
+
+function decodeEmbeddedOfferData(parts) {
+    if (!parts.length) return null;
+    const expectedTotal = parts[0].total;
+    if (
+        !Number.isInteger(expectedTotal) ||
+        expectedTotal < 1 ||
+        parts.some((part) => part.total !== expectedTotal)
+    ) {
+        return null;
+    }
+
+    const byIndex = new Map();
+    parts.forEach((part) => {
+        if (
+            Number.isInteger(part.index) &&
+            part.index >= 1 &&
+            part.index <= expectedTotal
+        ) {
+            byIndex.set(part.index, part.value);
+        }
+    });
+    if (byIndex.size !== expectedTotal) return null;
+
+    try {
+        const encoded = Array.from(
+            { length: expectedTotal },
+            (_, index) => byIndex.get(index + 1)
+        ).join('');
+        const binary = window.atob(encoded);
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        const payload = JSON.parse(new TextDecoder().decode(bytes));
+        return payload?.version === 1 && Array.isArray(payload.items) ? payload : null;
+    } catch (error) {
+        console.warn('Nie udało się odczytać danych edycyjnych z PDF:', error);
+        return null;
+    }
+}
+
+function hydrateEmbeddedItems(rawItems, pageCount) {
+    return rawItems.map((rawItem, index) => {
+        const position = Number.parseInt(rawItem.position, 10);
+        const qty = safeNumber(rawItem.qty, 1);
+        const catalogNetPrice = safeNumber(rawItem.catalogNetPrice, 0);
+        const discountPercent = safeNumber(rawItem.discountPercent, 0);
+        const netPrice = safeNumber(rawItem.netPrice, catalogNetPrice);
+        const netTotal = safeNumber(rawItem.netTotal, roundMoney(qty * netPrice));
+        return {
+            id: nextItemId++,
+            position: Number.isFinite(position) ? position : index + 1,
+            name: String(rawItem.name || '').trim(),
+            catalogIndex: String(rawItem.catalogIndex || '').trim(),
+            qty,
+            unit: String(rawItem.unit || 'szt.').trim() || 'szt.',
+            catalogNetPrice,
+            discountPercent,
+            netPrice,
+            netTotal,
+            preserveTotal: true,
+            sourcePage: Math.min(
+                Math.max(1, Number.parseInt(rawItem.sourcePage, 10) || 1),
+                Math.max(1, pageCount)
+            ),
+            original: {
+                catalogNetPrice,
+                discountPercent,
+                netPrice,
+                netTotal
+            }
+        };
+    }).filter((item) => item.name);
+}
+
+function restoreEmbeddedDocumentState(payload) {
+    if (payload.meta && typeof payload.meta === 'object') {
+        Object.keys(state.meta).forEach((key) => {
+            if (typeof payload.meta[key] === 'string') state.meta[key] = payload.meta[key];
+        });
+    }
+    state.vatPercent = safeNumber(payload.vatPercent, state.vatPercent);
+    if (payload.documentDataMode === 'filled' || payload.documentDataMode === 'blank') {
+        state.documentDataMode = payload.documentDataMode;
+    }
+    if (payload.documentColumns && typeof payload.documentColumns === 'object') {
+        DOCUMENT_COLUMNS.forEach((column) => {
+            state.documentColumns[column.key] = payload.documentColumns[column.key] !== false;
+        });
+        if (!getVisibleDocumentColumns().length) state.documentColumns.position = true;
+    }
+
+    document.getElementById('offerNumber').value = state.meta.offerNumber;
+    document.getElementById('issueDate').value = state.meta.issueDate;
+    document.getElementById('validityDate').value = state.meta.validityDate;
+    document.getElementById('paymentTerms').value = state.meta.paymentTerms;
+    document.getElementById('recipientName').value = state.meta.recipientName;
+    document.getElementById('recipientNip').value = state.meta.recipientNip;
+    document.getElementById('recipientAddress').value = state.meta.recipientAddress;
+    document.getElementById('vatPercent').value = formatInputNumber(state.vatPercent);
+    syncDocumentColumnControls();
+    syncDocumentDataMode();
+    syncDocumentMeta();
+}
+
+function removeLongTableLines(canvas, context, scale) {
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = image.data;
+    const horizontal = new Uint8Array(canvas.height);
+    const vertical = new Uint8Array(canvas.width);
+    const isDark = (x, y) => {
+        const index = (y * canvas.width + x) * 4;
+        return pixels[index] < 140 &&
+            pixels[index + 1] < 140 &&
+            pixels[index + 2] < 140;
+    };
+
+    for (let y = 0; y < canvas.height; y += 1) {
+        let darkPixels = 0;
+        for (let x = 0; x < canvas.width; x += 1) {
+            if (isDark(x, y)) darkPixels += 1;
+        }
+        if (darkPixels > canvas.width * 0.55) horizontal[y] = 1;
+    }
+    for (let x = 0; x < canvas.width; x += 1) {
+        let darkPixels = 0;
+        for (let y = 0; y < canvas.height; y += 1) {
+            if (isDark(x, y)) darkPixels += 1;
+        }
+        if (darkPixels > canvas.height * 0.35) vertical[x] = 1;
+    }
+
+    const verticalLines = collapseLineMask(vertical);
+    const padding = Math.max(2, Math.round(scale));
+    expandLineMask(horizontal, padding);
+    expandLineMask(vertical, padding);
+    for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+            if (!horizontal[y] && !vertical[x]) continue;
+            const index = (y * canvas.width + x) * 4;
+            pixels[index] = 255;
+            pixels[index + 1] = 255;
+            pixels[index + 2] = 255;
+            pixels[index + 3] = 255;
+        }
+    }
+    context.putImageData(image, 0, 0);
+    return { verticalLines };
+}
+
+function collapseLineMask(mask) {
+    const positions = [];
+    let start = -1;
+    for (let index = 0; index <= mask.length; index += 1) {
+        if (mask[index] && start < 0) {
+            start = index;
+        } else if (!mask[index] && start >= 0) {
+            positions.push((start + index - 1) / 2);
+            start = -1;
+        }
+    }
+    return positions;
+}
+
+function expandLineMask(mask, padding) {
+    const marked = [];
+    mask.forEach((value, index) => {
+        if (value) marked.push(index);
+    });
+    marked.forEach((index) => {
+        const start = Math.max(0, index - padding);
+        const end = Math.min(mask.length - 1, index + padding);
+        for (let position = start; position <= end; position += 1) {
+            mask[position] = 1;
+        }
+    });
+}
+
+function parseOcrPageItems(pageItems, pageWidth, pageNumber) {
+    const flexibleRows = parseFlexiblePageItems(pageItems, pageWidth, pageNumber);
+    if (flexibleRows.length) return flexibleRows;
+    const numberedRows = parseNumberedTablePageItems(pageItems, pageWidth, pageNumber);
+    if (numberedRows.length) return numberedRows;
+    return parseSapPageItems(pageItems, pageWidth, pageNumber);
 }
 
 function parsePageItems(pageItems, pageWidth, pageNumber) {
@@ -383,8 +650,19 @@ function parseFlexiblePageItems(pageItems, pageWidth, pageNumber) {
     [...headerGroup.items]
         .sort((a, b) => a.x - b.x)
         .forEach((item) => {
-            if (!layoutColumns.some((column) => Math.abs(column.x - item.x) < 12)) {
-                layoutColumns.push({ key: item.headerKey, x: item.x });
+            const previous = layoutColumns[layoutColumns.length - 1];
+            const continuesPreviousCell = previous &&
+                item.x <= previous.right + 9 &&
+                Math.abs(item.y - previous.y) <= 4;
+            if (!layoutColumns.some((column) => Math.abs(column.x - item.x) < 12) && !continuesPreviousCell) {
+                layoutColumns.push({
+                    key: item.headerKey,
+                    x: item.x,
+                    y: item.y,
+                    right: item.x + (item.width || 0)
+                });
+            } else if (continuesPreviousCell) {
+                previous.right = Math.max(previous.right, item.x + (item.width || 0));
             }
         });
     if (layoutColumns.length < 3) return [];
@@ -492,21 +770,48 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
     });
 
     let bestRun = [];
+    let bestRunScore = -Infinity;
     xGroups.forEach((group) => {
         const sorted = [...group.items]
             .sort((a, b) => b.y - a.y)
             .filter((item, index, list) => index === 0 || Math.abs(item.y - list[index - 1].y) > 2);
+        const sequentialPairs = sorted.slice(1).filter((item, index) =>
+            item.value === sorted[index].value + 1
+        ).length;
+        const requiredPairs = Math.max(1, Math.floor((sorted.length - 1) * 0.45));
+        if (
+            sorted.length >= 2 &&
+            group.x < pageWidth * 0.3 &&
+            sequentialPairs >= requiredPairs
+        ) {
+            const offsets = sorted.map((item, index) => item.value - index);
+            const offsetCounts = new Map();
+            offsets.forEach((offset) => {
+                offsetCounts.set(offset, (offsetCounts.get(offset) || 0) + 1);
+            });
+            const [dominantOffset, coherentRows] = [...offsetCounts.entries()]
+                .sort((a, b) => b[1] - a[1])[0];
+            const score = coherentRows * 5 + sequentialPairs * 3 + sorted.length;
+            if (score > bestRunScore) {
+                bestRunScore = score;
+                bestRun = sorted.map((item, index) => ({
+                    ...item,
+                    value: dominantOffset + index
+                }));
+            }
+        }
+
         let run = [];
         sorted.forEach((item) => {
             const previous = run[run.length - 1];
             if (!previous || (item.value === previous.value + 1 && item.y < previous.y - 3)) {
                 run.push(item);
             } else {
-                if (run.length > bestRun.length) bestRun = run;
+                if (bestRunScore < 0 && run.length > bestRun.length) bestRun = run;
                 run = [item];
             }
         });
-        if (run.length > bestRun.length) bestRun = run;
+        if (bestRunScore < 0 && run.length > bestRun.length) bestRun = run;
     });
     if (bestRun.length < 2) return [];
 
@@ -529,12 +834,21 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
         item.x >= tableLeft - 3 &&
         item.x <= tableRight + 3
     ));
+    const gridRows = parseKnownDocumentGridRows(
+        rowContents,
+        bestRun,
+        pageItems.gridColumns,
+        pageWidth,
+        pageNumber
+    );
+    if (gridRows.length === rowContents.length) return gridRows;
+
     const numericXGroups = [];
 
     rowContents.forEach((items, rowIndex) => {
         items
             .filter((item) =>
-                item.x > tableLeft + 18 &&
+                item.x > Math.max(tableLeft + 18, pageWidth * 0.45) &&
                 isStandaloneNumericCell(item.str)
             )
             .forEach((item) => {
@@ -558,7 +872,16 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
     const firstNumericX = numericColumns[0].x;
     const qtyColumn = numericColumns[0];
     const totalColumn = numericColumns[numericColumns.length - 1];
-    const priceColumn = numericColumns.length > 1
+    const discountColumnIndex = numericColumns.findIndex((column) =>
+        column.items.filter((item) => /%/.test(item.str)).length >=
+        Math.max(2, Math.ceil(column.items.length * 0.45))
+    );
+    const catalogPriceColumn = discountColumnIndex > 0
+        ? numericColumns[discountColumnIndex - 1]
+        : null;
+    const priceColumn = discountColumnIndex >= 0 && numericColumns[discountColumnIndex + 1]
+        ? numericColumns[discountColumnIndex + 1]
+        : numericColumns.length > 1
         ? numericColumns[numericColumns.length - 2]
         : totalColumn;
 
@@ -584,6 +907,11 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
                 : NaN;
         };
         const qty = safeNumber(valueAtColumn(qtyColumn), 1);
+        const discountItem = items.find((item) => /%/.test(item.str) && isStandaloneNumericCell(item.str));
+        const discountPercent = discountItem ? safeNumber(parseNumber(discountItem.str), 0) : 0;
+        let catalogNetPrice = catalogPriceColumn
+            ? valueAtColumn(catalogPriceColumn)
+            : NaN;
         let netTotal = valueAtColumn(totalColumn);
         let netPrice = valueAtColumn(priceColumn);
         if (!Number.isFinite(netPrice) && Number.isFinite(netTotal) && qty) {
@@ -592,8 +920,11 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
         if (!Number.isFinite(netTotal) && Number.isFinite(netPrice)) {
             netTotal = roundMoney(qty * netPrice);
         }
-        const discountItem = items.find((item) => /%/.test(item.str) && isStandaloneNumericCell(item.str));
-        const discountPercent = discountItem ? safeNumber(parseNumber(discountItem.str), 0) : 0;
+        if (!Number.isFinite(catalogNetPrice)) {
+            catalogNetPrice = discountPercent < 100
+                ? roundMoney(netPrice / (1 - discountPercent / 100))
+                : netPrice;
+        }
 
         if (!name || !Number.isFinite(netPrice) || !Number.isFinite(netTotal)) return null;
         return {
@@ -603,14 +934,68 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
             catalogIndex: '',
             qty,
             unit: 'szt.',
-            catalogNetPrice: netPrice,
+            catalogNetPrice,
             discountPercent,
             netPrice,
             netTotal,
             preserveTotal: true,
             sourcePage: pageNumber,
             original: {
-                catalogNetPrice: netPrice,
+                catalogNetPrice,
+                discountPercent,
+                netPrice,
+                netTotal
+            }
+        };
+    }).filter(Boolean);
+}
+
+function parseKnownDocumentGridRows(rowContents, anchors, gridColumns, pageWidth, pageNumber) {
+    if (
+        !Array.isArray(gridColumns) ||
+        gridColumns.length !== DOCUMENT_COLUMNS.length + 1 ||
+        gridColumns[gridColumns.length - 1] - gridColumns[0] < pageWidth * 0.7
+    ) {
+        return [];
+    }
+
+    return rowContents.map((items, rowIndex) => {
+        const cellText = gridColumns.slice(0, -1).map((left, columnIndex) => {
+            const right = gridColumns[columnIndex + 1];
+            return cleanCellText(joinCellItems(items.filter((item) =>
+                item.x >= left - 2 &&
+                item.x < right - 1
+            )));
+        });
+        const qty = safeNumber(parseNumber(cellText[3]), 1);
+        const catalogNetPrice = parseNumber(cellText[5]);
+        const discountPercent = safeNumber(parseNumber(cellText[6]), 0);
+        let netPrice = parseNumber(cellText[7]);
+        let netTotal = parseNumber(cellText[8]);
+        if (!Number.isFinite(netPrice) && Number.isFinite(catalogNetPrice)) {
+            netPrice = roundMoney(catalogNetPrice * (1 - discountPercent / 100));
+        }
+        if (!Number.isFinite(netTotal) && Number.isFinite(netPrice)) {
+            netTotal = roundMoney(netPrice * qty);
+        }
+        if (!cellText[1] || !Number.isFinite(netPrice) || !Number.isFinite(netTotal)) {
+            return null;
+        }
+        return {
+            id: nextItemId++,
+            position: anchors[rowIndex].value,
+            name: cellText[1],
+            catalogIndex: cellText[2],
+            qty,
+            unit: cellText[4] || 'szt.',
+            catalogNetPrice: Number.isFinite(catalogNetPrice) ? catalogNetPrice : netPrice,
+            discountPercent,
+            netPrice,
+            netTotal,
+            preserveTotal: true,
+            sourcePage: pageNumber,
+            original: {
+                catalogNetPrice: Number.isFinite(catalogNetPrice) ? catalogNetPrice : netPrice,
                 discountPercent,
                 netPrice,
                 netTotal
@@ -660,7 +1045,13 @@ function parseFlexibleRowItems(rowItems, columns, boundaries, pageNumber, genera
     const qty = safeNumber(firstNumber('qty'), 1);
     const discountPercent = safeNumber(firstNumber('discountPercent'), 0);
     let catalogNetPrice = firstNumber('catalogNetPrice');
-    let netPrice = firstNumber('netPrice');
+    const detectedNetPrices = (valuesByKey.netPrice || [])
+        .map(parseNumber)
+        .filter(Number.isFinite);
+    let netPrice = detectedNetPrices.at(-1);
+    if (!Number.isFinite(catalogNetPrice) && detectedNetPrices.length > 1) {
+        catalogNetPrice = detectedNetPrices[0];
+    }
     let netTotal = firstNumber('netTotal');
 
     if (!Number.isFinite(netPrice) && Number.isFinite(catalogNetPrice)) {
@@ -1171,7 +1562,10 @@ async function generatePDF() {
                 continue;
             }
 
-            await worker.toPdf().save();
+            await worker.toPdf();
+            const pdfDocument = await worker.get('pdf');
+            embedEditableOfferData(pdfDocument);
+            await worker.save();
             releaseCanvas(canvas);
             saved = true;
             break;
@@ -1188,6 +1582,56 @@ async function generatePDF() {
         downloadButton.disabled = false;
         downloadButton.textContent = originalButtonText;
     }
+}
+
+function embedEditableOfferData(pdfDocument) {
+    if (!pdfDocument?.text || !pdfDocument?.setPage) return;
+
+    const payload = {
+        version: 1,
+        items: state.items.map((item) => ({
+            position: item.position,
+            name: item.name,
+            catalogIndex: item.catalogIndex,
+            qty: item.qty,
+            unit: item.unit,
+            catalogNetPrice: item.catalogNetPrice,
+            discountPercent: item.discountPercent,
+            netPrice: item.netPrice,
+            netTotal: item.netTotal,
+            sourcePage: item.sourcePage
+        })),
+        meta: { ...state.meta },
+        vatPercent: state.vatPercent,
+        documentDataMode: state.documentDataMode,
+        documentColumns: { ...state.documentColumns }
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    let binary = '';
+    const byteChunkSize = 8192;
+    for (let index = 0; index < bytes.length; index += byteChunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + byteChunkSize));
+    }
+    const encoded = window.btoa(binary);
+    const dataChunkSize = 160;
+    const chunks = [];
+    for (let index = 0; index < encoded.length; index += dataChunkSize) {
+        chunks.push(encoded.slice(index, index + dataChunkSize));
+    }
+
+    const pageCount = Math.max(1, pdfDocument.getNumberOfPages());
+    pdfDocument.setFontSize(0.5);
+    pdfDocument.setTextColor(255, 255, 255);
+    chunks.forEach((chunk, index) => {
+        const pageNumber = (index % pageCount) + 1;
+        const lineNumber = Math.floor(index / pageCount);
+        pdfDocument.setPage(pageNumber);
+        pdfDocument.text(
+            `${EMBEDDED_DATA_PREFIX}|${index + 1}|${chunks.length}|${chunk}`,
+            0.5,
+            296 - lineNumber * 0.35
+        );
+    });
 }
 
 function canvasHasVisibleContent(canvas) {
