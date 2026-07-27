@@ -19,14 +19,14 @@ const DOCUMENT_COLUMNS = [
 ];
 const FLEXIBLE_HEADER_ALIASES = {
     position: ['lp', 'poz', 'pozycja', 'nr', 'numer'],
-    name: ['nazwa', 'opis', 'produkt', 'towar', 'usluga', 'asortyment', 'nazwatowaru', 'nazwaproduktu'],
+    name: ['nazwa', 'opis', 'produkt', 'towar', 'usluga', 'asortyment', 'nazwatowaru', 'nazwaproduktu', 'description', 'itemdescription', 'servicedescription'],
     catalogIndex: ['indeks', 'kod', 'sku', 'symbol', 'nrkatalogowy', 'indekskatalogowy', 'kodproduktu'],
     qty: ['ilosc', 'qty', 'liczba'],
     unit: ['jm', 'jedn', 'jednostka', 'jednostkamiary'],
     catalogNetPrice: ['cenakatalogowa', 'cenacennikowa'],
     discountPercent: ['rabat', 'rabatprocent', 'upust', 'upustprocent'],
     netPrice: ['cena', 'netto', 'cenanetto', 'cenajednostkowa', 'cenajednostkowanetto', 'nettoporabacie', 'cenaporabacie'],
-    netTotal: ['wartosc', 'wartoscnetto', 'razem', 'razemnetto', 'suma', 'sumanetto', 'wartoscbrutto']
+    netTotal: ['wartosc', 'wartoscnetto', 'razem', 'razemnetto', 'suma', 'sumanetto', 'wartoscbrutto', 'amount', 'amountineur', 'amountinpln', 'lineamount']
 };
 const EMBEDDED_DATA_PREFIX = 'OFD1';
 let nextItemId = 1;
@@ -227,6 +227,7 @@ async function handlePdfFile(file) {
         const pdf = await window.pdfjsLib.getDocument({ data }).promise;
         const extractedItems = [];
         const embeddedDataParts = [];
+        const ocrCandidates = [];
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
             setParsingStatus(true, `Czytam stronę ${pageNumber} z ${pdf.numPages}…`);
@@ -246,13 +247,32 @@ async function handlePdfFile(file) {
             embeddedDataParts.push(...pageEmbeddedParts);
             const pageItems = allPageItems.filter((item) => !isEmbeddedDataText(item.str));
 
-            let parsedRows = parsePageItems(pageItems, viewport.width, pageNumber);
+            const parsedRows = parsePageItems(pageItems, viewport.width, pageNumber);
             if (!parsedRows.length && !pageEmbeddedParts.length) {
-                setParsingStatus(true, `Uruchamiam OCR strony ${pageNumber} z ${pdf.numPages}…`);
-                const ocrItems = await recognizePageWithOcr(page, pageNumber, pdf.numPages);
-                parsedRows = parseOcrPageItems(ocrItems, viewport.width, pageNumber);
+                ocrCandidates.push({ page, pageNumber, pageWidth: viewport.width });
             }
             extractedItems.push(...parsedRows);
+        }
+
+        if (!extractedItems.length && !embeddedDataParts.length) {
+            for (const candidate of ocrCandidates) {
+                setParsingStatus(
+                    true,
+                    `Uruchamiam OCR strony ${candidate.pageNumber} z ${pdf.numPages}…`
+                );
+                const ocrItems = await recognizePageWithOcr(
+                    candidate.page,
+                    candidate.pageNumber,
+                    pdf.numPages
+                );
+                extractedItems.push(
+                    ...parseOcrPageItems(
+                        ocrItems,
+                        candidate.pageWidth,
+                        candidate.pageNumber
+                    )
+                );
+            }
         }
 
         const embeddedPayload = decodeEmbeddedOfferData(embeddedDataParts);
@@ -331,6 +351,9 @@ async function recognizePageWithOcr(page, pageNumber, pageCount) {
             height: (word.bbox.y1 - word.bbox.y0) / scale
         }));
     items.gridColumns = detectedGrid.verticalLines.map((position) => position / scale);
+    items.gridRows = detectedGrid.horizontalLines
+        .map((position) => (canvas.height - position) / scale)
+        .sort((a, b) => b - a);
     releaseCanvas(canvas);
     return items;
 }
@@ -483,6 +506,7 @@ function removeLongTableLines(canvas, context, scale) {
         if (darkPixels > canvas.height * 0.35) vertical[x] = 1;
     }
 
+    const horizontalLines = collapseLineMask(horizontal);
     const verticalLines = collapseLineMask(vertical);
     const padding = Math.max(2, Math.round(scale));
     expandLineMask(horizontal, padding);
@@ -498,7 +522,7 @@ function removeLongTableLines(canvas, context, scale) {
         }
     }
     context.putImageData(image, 0, 0);
-    return { verticalLines };
+    return { horizontalLines, verticalLines };
 }
 
 function collapseLineMask(mask) {
@@ -665,7 +689,7 @@ function parseFlexiblePageItems(pageItems, pageWidth, pageNumber) {
                 previous.right = Math.max(previous.right, item.x + (item.width || 0));
             }
         });
-    if (layoutColumns.length < 3) return [];
+    if (layoutColumns.length < 2) return [];
 
     const tableLeft = Math.max(0, layoutColumns[0].x - 5);
     const tableRight = pageWidth - tableLeft;
@@ -754,6 +778,7 @@ function parseFlexiblePageItems(pageItems, pageWidth, pageNumber) {
 }
 
 function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
+    const detectedGridColumns = resolveOcrGridColumns(pageItems, pageWidth);
     const numberCandidates = pageItems
         .filter((item) => /^\s*\d{1,4}[.)]?\s*$/.test(item.str))
         .map((item) => ({ ...item, value: parseInt(item.str, 10) }));
@@ -813,11 +838,43 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
         });
         if (bestRunScore < 0 && run.length > bestRun.length) bestRun = run;
     });
-    if (bestRun.length < 2) return [];
+    if (bestRun.length < 2) {
+        const gridColumns = detectedGridColumns;
+        if (
+            Array.isArray(gridColumns) &&
+            gridColumns.length === DOCUMENT_COLUMNS.length + 1
+        ) {
+            const positionCandidates = numberCandidates
+                .filter((item) =>
+                    item.x >= gridColumns[0] - 3 &&
+                    item.x < gridColumns[1] + 3
+                )
+                .sort((a, b) => b.y - a.y);
+            if (positionCandidates.length === 1) {
+                bestRun = [positionCandidates[0]];
+            }
+        }
+    }
+    if (!bestRun.length) return [];
 
     const rowBands = bestRun.map((anchor, index) => {
         const previous = bestRun[index - 1];
         const next = bestRun[index + 1];
+        if (!previous && !next && Array.isArray(pageItems.gridRows)) {
+            const topLine = [...pageItems.gridRows]
+                .filter((position) => position > anchor.y + 1)
+                .sort((a, b) => a - b)[0];
+            const bottomLine = [...pageItems.gridRows]
+                .filter((position) => position < anchor.y - 1)
+                .sort((a, b) => b - a)[0];
+            if (Number.isFinite(topLine) && Number.isFinite(bottomLine)) {
+                return {
+                    anchor,
+                    top: topLine - 1,
+                    bottom: bottomLine + 1
+                };
+            }
+        }
         const previousGap = previous ? previous.y - anchor.y : next ? anchor.y - next.y : 14;
         const nextGap = next ? anchor.y - next.y : previousGap;
         return {
@@ -837,7 +894,7 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
     const gridRows = parseKnownDocumentGridRows(
         rowContents,
         bestRun,
-        pageItems.gridColumns,
+        detectedGridColumns,
         pageWidth,
         pageNumber
     );
@@ -950,6 +1007,42 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
     }).filter(Boolean);
 }
 
+function resolveOcrGridColumns(pageItems, pageWidth) {
+    if (
+        Array.isArray(pageItems.gridColumns) &&
+        pageItems.gridColumns.length === DOCUMENT_COLUMNS.length + 1
+    ) {
+        return pageItems.gridColumns;
+    }
+
+    const separatorGroups = [];
+    pageItems
+        .filter((item) => /^[I|]$/.test(item.str))
+        .forEach((item) => {
+            let group = separatorGroups.find((candidate) => Math.abs(candidate.y - item.y) <= 3);
+            if (!group) {
+                group = { y: item.y, items: [] };
+                separatorGroups.push(group);
+            }
+            group.items.push(item);
+        });
+    const bestGroup = separatorGroups
+        .map((group) => ({
+            ...group,
+            columns: [...new Set(
+                group.items
+                    .map((item) => Math.round(item.x * 2) / 2)
+                    .sort((a, b) => a - b)
+            )]
+        }))
+        .filter((group) =>
+            group.columns.length === DOCUMENT_COLUMNS.length + 1 &&
+            group.columns[group.columns.length - 1] - group.columns[0] > pageWidth * 0.7
+        )
+        .sort((a, b) => b.items.length - a.items.length)[0];
+    return bestGroup?.columns || [];
+}
+
 function parseKnownDocumentGridRows(rowContents, anchors, gridColumns, pageWidth, pageNumber) {
     if (
         !Array.isArray(gridColumns) ||
@@ -964,7 +1057,8 @@ function parseKnownDocumentGridRows(rowContents, anchors, gridColumns, pageWidth
             const right = gridColumns[columnIndex + 1];
             return cleanCellText(joinCellItems(items.filter((item) =>
                 item.x >= left - 2 &&
-                item.x < right - 1
+                item.x < right - 1 &&
+                !/^[I|]$/.test(item.str)
             )));
         });
         const qty = safeNumber(parseNumber(cellText[3]), 1);
