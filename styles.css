@@ -271,7 +271,7 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(237,85,44,
 .paper-stage { padding: 24px; overflow-x: auto; border: 1.5px solid var(--ink); background: #dfe2e3; }
 .pdf-paper {
     width: 210mm;
-    min-height: 297mm;
+    min-height: 296mm;
     margin: auto;
     padding: 11mm 11mm 2mm;
     background: #fff;

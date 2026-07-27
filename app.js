@@ -215,7 +215,7 @@ async function handlePdfFile(file) {
 
         const items = deduplicateAndSort(extractedItems);
         if (!items.length) {
-            throw new Error('Nie znaleziono tabeli z pozycjami. Plik może być skanem albo mieć inny układ kolumn.');
+            throw new Error('Nie znaleziono wierszy tabeli. Sprawdź, czy PDF zawiera tekst, a nie tylko obraz skanu.');
         }
 
         state.items = items;
@@ -242,7 +242,9 @@ async function handlePdfFile(file) {
 function parsePageItems(pageItems, pageWidth, pageNumber) {
     const exactRows = parseSapPageItems(pageItems, pageWidth, pageNumber);
     if (exactRows.length) return exactRows;
-    return parseFlexiblePageItems(pageItems, pageWidth, pageNumber);
+    const flexibleRows = parseFlexiblePageItems(pageItems, pageWidth, pageNumber);
+    if (flexibleRows.length) return flexibleRows;
+    return parseNumberedTablePageItems(pageItems, pageWidth, pageNumber);
 }
 
 function parseSapPageItems(pageItems, pageWidth, pageNumber) {
@@ -340,92 +342,295 @@ function parseFlexiblePageItems(pageItems, pageWidth, pageNumber) {
             keys: new Set(group.items.map((item) => item.headerKey))
         }))
         .filter((group) =>
-            group.keys.has('position') &&
             group.keys.has('name') &&
             (group.keys.has('qty') || group.keys.has('netPrice') || group.keys.has('netTotal'))
         )
         .sort((a, b) => b.keys.size - a.keys.size)[0];
     if (!headerGroup) return [];
 
-    const uniqueColumns = [];
+    const layoutColumns = [];
     [...headerGroup.items]
         .sort((a, b) => a.x - b.x)
         .forEach((item) => {
-            if (!uniqueColumns.some((column) => column.key === item.headerKey)) {
-                uniqueColumns.push({ key: item.headerKey, x: item.x });
+            if (!layoutColumns.some((column) => Math.abs(column.x - item.x) < 12)) {
+                layoutColumns.push({ key: item.headerKey, x: item.x });
             }
         });
-    if (uniqueColumns.length < 3) return [];
+    if (layoutColumns.length < 3) return [];
 
-    const tableLeft = Math.max(0, uniqueColumns[0].x - 5);
+    const tableLeft = Math.max(0, layoutColumns[0].x - 5);
     const tableRight = pageWidth - tableLeft;
-    const boundaries = uniqueColumns.slice(0, -1).map((column, index) =>
-        (column.x + uniqueColumns[index + 1].x) / 2
+    const boundaries = layoutColumns.slice(0, -1).map((column, index) =>
+        (column.x + layoutColumns[index + 1].x) / 2
     );
-    const firstColumnEnd = boundaries[0] || tableLeft + 35;
     const headerY = headerGroup.y;
-    const rowStarts = normalizedItems
+    const stopYs = normalizedItems
         .filter((item) =>
-            /^\d{1,4}[.)]?$/.test(item.str) &&
-            item.x >= tableLeft - 3 &&
-            item.x < firstColumnEnd &&
-            item.y < headerY - 4 &&
-            item.y > 24
+            /^(razem|suma|podsumowanie|total|wartoscslownie|doplaty)$/.test(item.normalized) ||
+            item.normalized.startsWith('wydrukowano') ||
+            item.normalized.startsWith('strona')
         )
-        .sort((a, b) => b.y - a.y);
+        .map((item) => item.y);
+    const tableBottom = Math.max(24, ...stopYs.filter((y) => y < headerY));
+    const headerBottomY = Math.min(
+        headerY,
+        ...normalizedItems
+            .filter((item) =>
+                item.x >= tableLeft - 3 &&
+                item.x <= tableRight + 3 &&
+                item.y <= headerY &&
+                item.y >= headerY - 22
+            )
+            .map((item) => item.y)
+    );
+    const positionColumnIndex = layoutColumns.findIndex((column) => column.key === 'position');
+    let rowStarts = [];
+
+    if (positionColumnIndex >= 0) {
+        const leftBoundary = positionColumnIndex === 0 ? tableLeft : boundaries[positionColumnIndex - 1];
+        const rightBoundary = boundaries[positionColumnIndex] || tableRight;
+        rowStarts = normalizedItems
+            .filter((item) =>
+                /^\d{1,4}[.)]?$/.test(item.str) &&
+                item.x >= leftBoundary - 3 &&
+                item.x < rightBoundary &&
+                item.y < headerY - 4 &&
+                item.y > tableBottom + 2
+            )
+            .sort((a, b) => b.y - a.y);
+    } else {
+        const anchorKey = ['qty', 'netTotal', 'netPrice']
+            .find((key) => layoutColumns.some((column) => column.key === key));
+        const anchorIndex = layoutColumns.findIndex((column) => column.key === anchorKey);
+        const leftBoundary = anchorIndex === 0 ? tableLeft : boundaries[anchorIndex - 1];
+        const rightBoundary = boundaries[anchorIndex] || tableRight;
+        rowStarts = normalizedItems
+            .filter((item) =>
+                Number.isFinite(parseNumber(item.str)) &&
+                item.x >= leftBoundary - 3 &&
+                item.x < rightBoundary &&
+                item.y < headerY - 4 &&
+                item.y > tableBottom + 2
+            )
+            .sort((a, b) => b.y - a.y);
+    }
+
     const uniqueStarts = rowStarts.filter((item, index, list) =>
         index === 0 || Math.abs(item.y - list[index - 1].y) > 2
     );
     if (!uniqueStarts.length) return [];
 
-    const stopYs = normalizedItems
-        .filter((item) =>
-            /^(razem|suma|netto|brutto|wartoscslownie|doplaty)$/.test(item.normalized) ||
-            item.normalized.startsWith('wydrukowano') ||
-            item.normalized.startsWith('strona')
-        )
-        .map((item) => item.y);
-
     return uniqueStarts.map((start, index) => {
         const nextStart = uniqueStarts[index + 1];
-        const closestSummary = Math.max(24, ...stopYs.filter((y) => y < start.y));
-        const bottomY = nextStart ? nextStart.y + 2 : closestSummary + 2;
-        const topY = start.y + Math.max(3, start.height * 0.5);
+        const previousStart = uniqueStarts[index - 1];
+        const bottomY = nextStart ? (start.y + nextStart.y) / 2 : tableBottom + 2;
+        const topY = previousStart
+            ? (previousStart.y + start.y) / 2
+            : (headerBottomY + start.y) / 2;
         const rowItems = pageItems.filter((item) =>
             item.y <= topY &&
             item.y > bottomY &&
             item.x >= tableLeft - 3 &&
             item.x <= tableRight + 3
         );
-        return parseFlexibleRowItems(rowItems, uniqueColumns, boundaries, pageNumber);
+        const generatedPosition = positionColumnIndex < 0 ? index + 1 : null;
+        return parseFlexibleRowItems(
+            rowItems,
+            layoutColumns,
+            boundaries,
+            pageNumber,
+            generatedPosition
+        );
     }).filter(Boolean);
+}
+
+function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
+    const numberCandidates = pageItems
+        .filter((item) => /^\s*\d{1,4}[.)]?\s*$/.test(item.str))
+        .map((item) => ({ ...item, value: parseInt(item.str, 10) }));
+    const xGroups = [];
+
+    numberCandidates.forEach((item) => {
+        let group = xGroups.find((candidate) => Math.abs(candidate.x - item.x) <= 8);
+        if (!group) {
+            group = { x: item.x, items: [] };
+            xGroups.push(group);
+        }
+        group.items.push(item);
+        group.x = group.items.reduce((sum, entry) => sum + entry.x, 0) / group.items.length;
+    });
+
+    let bestRun = [];
+    xGroups.forEach((group) => {
+        const sorted = [...group.items]
+            .sort((a, b) => b.y - a.y)
+            .filter((item, index, list) => index === 0 || Math.abs(item.y - list[index - 1].y) > 2);
+        let run = [];
+        sorted.forEach((item) => {
+            const previous = run[run.length - 1];
+            if (!previous || (item.value === previous.value + 1 && item.y < previous.y - 3)) {
+                run.push(item);
+            } else {
+                if (run.length > bestRun.length) bestRun = run;
+                run = [item];
+            }
+        });
+        if (run.length > bestRun.length) bestRun = run;
+    });
+    if (bestRun.length < 2) return [];
+
+    const rowBands = bestRun.map((anchor, index) => {
+        const previous = bestRun[index - 1];
+        const next = bestRun[index + 1];
+        const previousGap = previous ? previous.y - anchor.y : next ? anchor.y - next.y : 14;
+        const nextGap = next ? anchor.y - next.y : previousGap;
+        return {
+            anchor,
+            top: previous ? (previous.y + anchor.y) / 2 : anchor.y + previousGap * 0.55,
+            bottom: next ? (anchor.y + next.y) / 2 : anchor.y - nextGap * 0.55
+        };
+    });
+    const tableLeft = Math.max(0, bestRun[0].x - 5);
+    const tableRight = pageWidth - tableLeft;
+    const rowContents = rowBands.map((band) => pageItems.filter((item) =>
+        item.y <= band.top &&
+        item.y > band.bottom &&
+        item.x >= tableLeft - 3 &&
+        item.x <= tableRight + 3
+    ));
+    const numericXGroups = [];
+
+    rowContents.forEach((items, rowIndex) => {
+        items
+            .filter((item) =>
+                item.x > tableLeft + 18 &&
+                isStandaloneNumericCell(item.str)
+            )
+            .forEach((item) => {
+                let group = numericXGroups.find((candidate) => Math.abs(candidate.x - item.x) <= 12);
+                if (!group) {
+                    group = { x: item.x, rows: new Set(), items: [] };
+                    numericXGroups.push(group);
+                }
+                group.items.push(item);
+                group.rows.add(rowIndex);
+                group.x = group.items.reduce((sum, entry) => sum + entry.x, 0) / group.items.length;
+            });
+    });
+
+    const minimumRows = Math.max(2, Math.ceil(bestRun.length * 0.5));
+    const numericColumns = numericXGroups
+        .filter((group) => group.rows.size >= minimumRows)
+        .sort((a, b) => a.x - b.x);
+    if (!numericColumns.length) return [];
+
+    const firstNumericX = numericColumns[0].x;
+    const qtyColumn = numericColumns[0];
+    const totalColumn = numericColumns[numericColumns.length - 1];
+    const priceColumn = numericColumns.length > 1
+        ? numericColumns[numericColumns.length - 2]
+        : totalColumn;
+
+    return rowContents.map((items, index) => {
+        const anchor = bestRun[index];
+        const nameItems = items.filter((item) =>
+            item.x > anchor.x + 8 &&
+            item.x < firstNumericX - 6 &&
+            !/^\s*\d{1,4}[.)]?\s*$/.test(item.str)
+        );
+        let name = cleanCellText(joinCellItems(nameItems));
+        if (!name) {
+            name = cleanCellText(joinCellItems(items.filter((item) =>
+                item.x > anchor.x + 8 && !isStandaloneNumericCell(item.str)
+            )));
+        }
+        const valueAtColumn = (column) => {
+            const candidate = items
+                .filter((item) => isStandaloneNumericCell(item.str))
+                .sort((a, b) => Math.abs(a.x - column.x) - Math.abs(b.x - column.x))[0];
+            return candidate && Math.abs(candidate.x - column.x) <= 18
+                ? parseNumber(candidate.str)
+                : NaN;
+        };
+        const qty = safeNumber(valueAtColumn(qtyColumn), 1);
+        let netTotal = valueAtColumn(totalColumn);
+        let netPrice = valueAtColumn(priceColumn);
+        if (!Number.isFinite(netPrice) && Number.isFinite(netTotal) && qty) {
+            netPrice = roundMoney(netTotal / qty);
+        }
+        if (!Number.isFinite(netTotal) && Number.isFinite(netPrice)) {
+            netTotal = roundMoney(qty * netPrice);
+        }
+        const discountItem = items.find((item) => /%/.test(item.str) && isStandaloneNumericCell(item.str));
+        const discountPercent = discountItem ? safeNumber(parseNumber(discountItem.str), 0) : 0;
+
+        if (!name || !Number.isFinite(netPrice) || !Number.isFinite(netTotal)) return null;
+        return {
+            id: nextItemId++,
+            position: anchor.value,
+            name,
+            catalogIndex: '',
+            qty,
+            unit: 'szt.',
+            catalogNetPrice: netPrice,
+            discountPercent,
+            netPrice,
+            netTotal,
+            preserveTotal: true,
+            sourcePage: pageNumber,
+            original: {
+                catalogNetPrice: netPrice,
+                discountPercent,
+                netPrice,
+                netTotal
+            }
+        };
+    }).filter(Boolean);
+}
+
+function isStandaloneNumericCell(value) {
+    return /^-?\s*\d[\d\s.,]*\s*%?$/.test(String(value || '').replace(/\u00a0/g, ' ').trim());
 }
 
 function identifyFlexibleHeader(value) {
     const normalized = normalizeLabel(value);
     return Object.entries(FLEXIBLE_HEADER_ALIASES)
-        .find(([, aliases]) => aliases.includes(normalized))?.[0] || '';
+        .find(([, aliases]) => aliases.some((alias) =>
+            normalized === alias ||
+            (alias.length >= 4 && normalized.startsWith(alias))
+        ))?.[0] || '';
 }
 
-function parseFlexibleRowItems(rowItems, columns, boundaries, pageNumber) {
-    const cellItems = Object.fromEntries(columns.map((column) => [column.key, []]));
+function parseFlexibleRowItems(rowItems, columns, boundaries, pageNumber, generatedPosition = null) {
+    const cellItems = columns.map(() => []);
     rowItems.forEach((item) => {
         let columnIndex = boundaries.findIndex((boundary) => item.x < boundary);
         if (columnIndex === -1) columnIndex = columns.length - 1;
-        const column = columns[columnIndex];
-        if (column) cellItems[column.key].push(item);
+        if (columns[columnIndex]) cellItems[columnIndex].push(item);
     });
-    const values = Object.fromEntries(
-        Object.entries(cellItems).map(([key, items]) => [key, joinCellItems(items)])
-    );
+    const valuesByKey = {};
+    columns.forEach((column, index) => {
+        const value = joinCellItems(cellItems[index]);
+        if (!valuesByKey[column.key]) valuesByKey[column.key] = [];
+        valuesByKey[column.key].push(value);
+    });
+    const firstText = (key) =>
+        (valuesByKey[key] || []).map(cleanCellText).find(Boolean) || '';
+    const firstNumber = (key) => {
+        for (const value of valuesByKey[key] || []) {
+            const number = parseNumber(value);
+            if (Number.isFinite(number)) return number;
+        }
+        return NaN;
+    };
 
-    const position = parseInt(values.position, 10);
-    const name = cleanCellText(values.name);
-    const qty = safeNumber(parseNumber(values.qty), 1);
-    const discountPercent = safeNumber(parseNumber(values.discountPercent), 0);
-    let catalogNetPrice = parseNumber(values.catalogNetPrice);
-    let netPrice = parseNumber(values.netPrice);
-    let netTotal = parseNumber(values.netTotal);
+    const position = generatedPosition ?? parseInt(firstText('position'), 10);
+    const name = firstText('name');
+    const qty = safeNumber(firstNumber('qty'), 1);
+    const discountPercent = safeNumber(firstNumber('discountPercent'), 0);
+    let catalogNetPrice = firstNumber('catalogNetPrice');
+    let netPrice = firstNumber('netPrice');
+    let netTotal = firstNumber('netTotal');
 
     if (!Number.isFinite(netPrice) && Number.isFinite(catalogNetPrice)) {
         netPrice = roundMoney(catalogNetPrice * (1 - discountPercent / 100));
@@ -455,9 +660,9 @@ function parseFlexibleRowItems(rowItems, columns, boundaries, pageNumber) {
         id: nextItemId++,
         position,
         name,
-        catalogIndex: cleanCellText(values.catalogIndex),
+        catalogIndex: firstText('catalogIndex'),
         qty,
-        unit: cleanCellText(values.unit) || 'szt.',
+        unit: firstText('unit') || 'szt.',
         catalogNetPrice,
         discountPercent,
         netPrice,
