@@ -67,6 +67,7 @@ button:disabled { cursor: wait; opacity: .68; transform: none; box-shadow: none;
 .header-title p { margin: 4px 0 0; overflow: hidden; color: var(--muted); font-size: 10.5px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions, .price-actions, .table-actions { display: flex; align-items: center; gap: 10px; }
 .header-actions { flex: 0 0 auto; }
+.price-actions { align-items: flex-end; }
 
 .button {
     min-height: 40px;
@@ -207,6 +208,7 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(237,85,44,
 .price-tools { margin-top: 18px; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .price-tools > div:first-child { max-width: 720px; }
 .compact-field { width: 130px; }
+.compact-field input { min-height: 40px; }
 
 .editor-panel { min-width: 0; margin-top: 18px; overflow: hidden; }
 .count-badge { padding: 7px 10px; border: 1.25px solid var(--ink); border-radius: 999px; background: var(--soft); font-size: 11px; font-weight: 700; }
