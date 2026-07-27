@@ -554,6 +554,8 @@ function expandLineMask(mask, padding) {
 }
 
 function parseOcrPageItems(pageItems, pageWidth, pageNumber) {
+    const waproRows = parseWaproPageItems(pageItems, pageWidth, pageNumber);
+    if (waproRows.length) return waproRows;
     const flexibleRows = parseFlexiblePageItems(pageItems, pageWidth, pageNumber);
     if (flexibleRows.length) return flexibleRows;
     const numberedRows = parseNumberedTablePageItems(pageItems, pageWidth, pageNumber);
@@ -562,11 +564,153 @@ function parseOcrPageItems(pageItems, pageWidth, pageNumber) {
 }
 
 function parsePageItems(pageItems, pageWidth, pageNumber) {
+    const waproRows = parseWaproPageItems(pageItems, pageWidth, pageNumber);
+    if (waproRows.length) return waproRows;
     const exactRows = parseSapPageItems(pageItems, pageWidth, pageNumber);
     if (exactRows.length) return exactRows;
     const flexibleRows = parseFlexiblePageItems(pageItems, pageWidth, pageNumber);
     if (flexibleRows.length) return flexibleRows;
     return parseNumberedTablePageItems(pageItems, pageWidth, pageNumber);
+}
+
+function parseWaproPageItems(pageItems, pageWidth, pageNumber) {
+    const normalizedItems = pageItems.map((item) => ({
+        ...item,
+        normalized: normalizeLabel(item.str)
+    }));
+    const positionHeader = normalizedItems.find((item) => item.normalized === 'lp');
+    if (!positionHeader) return [];
+
+    const headerY = positionHeader.y;
+    const sameHeaderLine = (item) => Math.abs(item.y - headerY) <= 8;
+    const nameHeader = normalizedItems.find((item) =>
+        sameHeaderLine(item) && item.normalized.startsWith('nazwatowar')
+    );
+    const qtyHeader = normalizedItems.find((item) =>
+        sameHeaderLine(item) && item.normalized === 'ilosc'
+    );
+    const unitHeader = normalizedItems.find((item) =>
+        sameHeaderLine(item) && item.normalized.startsWith('jednm')
+    );
+    const priceHeader = normalizedItems.find((item) =>
+        sameHeaderLine(item) && item.normalized.startsWith('cenajedn')
+    );
+    const valueHeaders = normalizedItems
+        .filter((item) => sameHeaderLine(item) && item.normalized === 'wartosc')
+        .sort((a, b) => a.x - b.x);
+    const taxRateHeader = normalizedItems.find((item) =>
+        sameHeaderLine(item) && item.normalized === 'st'
+    );
+    const taxAmountHeader = normalizedItems.find((item) =>
+        sameHeaderLine(item) && item.normalized === 'kwota'
+    );
+    if (
+        !nameHeader ||
+        !qtyHeader ||
+        !unitHeader ||
+        !priceHeader ||
+        valueHeaders.length < 2 ||
+        !taxRateHeader ||
+        !taxAmountHeader
+    ) {
+        return [];
+    }
+
+    const positionRight = positionHeader.x + positionHeader.width + 1;
+    const rowStarts = normalizedItems
+        .filter((item) =>
+            /^\d{1,4}$/.test(item.str) &&
+            item.x >= positionHeader.x - 3 &&
+            item.x <= positionRight + 3 &&
+            item.y < headerY - 5
+        )
+        .sort((a, b) => b.y - a.y);
+    if (!rowStarts.length) return [];
+
+    const summaryY = Math.max(
+        24,
+        ...normalizedItems
+            .filter((item) =>
+                item.y < headerY &&
+                (item.normalized === 'razem' || item.normalized === 'ogoem')
+            )
+            .map((item) => item.y)
+    );
+    const columnBoundaries = [
+        positionRight,
+        qtyHeader.x - 5,
+        unitHeader.x - 2,
+        priceHeader.x - 2,
+        valueHeaders[0].x - 4,
+        taxRateHeader.x - 3,
+        taxAmountHeader.x - 3,
+        valueHeaders[1].x - 4,
+        pageWidth - positionHeader.x
+    ];
+
+    return rowStarts.map((start, index) => {
+        const nextStart = rowStarts[index + 1];
+        const topY = start.y + Math.max(4, start.height * 0.5);
+        const bottomY = nextStart ? nextStart.y + 4 : summaryY + 2;
+        const rowItems = pageItems.filter((item) =>
+            item.y <= topY &&
+            item.y > bottomY &&
+            item.x >= positionHeader.x - 3 &&
+            item.x <= pageWidth - positionHeader.x + 3
+        );
+        const cells = Array.from({ length: 9 }, () => []);
+        rowItems.forEach((item) => {
+            const columnIndex = columnBoundaries.findIndex((boundary) => item.x < boundary);
+            cells[columnIndex < 0 ? 8 : columnIndex].push(item);
+        });
+
+        const nameCellItems = cells[1];
+        const catalogIndexItem = [...nameCellItems]
+            .sort((a, b) => a.y - b.y)
+            .find((item) =>
+                /[A-Z]/i.test(item.str) &&
+                /\d/.test(item.str) &&
+                /^[A-Z0-9][A-Z0-9/_-]{5,}$/i.test(item.str.replace(/\s/g, ''))
+            );
+        const name = cleanCellText(joinCellItems(
+            catalogIndexItem
+                ? nameCellItems.filter((item) => item !== catalogIndexItem)
+                : nameCellItems
+        ));
+        const qty = parseNumber(joinCellItems(cells[2]));
+        const unit = cleanCellText(joinCellItems(cells[3])) || 'szt.';
+        const netPrice = parseNumber(joinCellItems(cells[4]));
+        const netTotal = parseNumber(joinCellItems(cells[5]));
+        if (
+            !name ||
+            !Number.isFinite(qty) ||
+            !Number.isFinite(netPrice) ||
+            !Number.isFinite(netTotal)
+        ) {
+            return null;
+        }
+
+        return {
+            id: nextItemId++,
+            position: Number.parseInt(start.str, 10),
+            name,
+            catalogIndex: catalogIndexItem ? cleanCellText(catalogIndexItem.str) : '',
+            qty,
+            unit,
+            catalogNetPrice: netPrice,
+            discountPercent: 0,
+            netPrice,
+            netTotal,
+            preserveTotal: true,
+            sourcePage: pageNumber,
+            original: {
+                catalogNetPrice: netPrice,
+                discountPercent: 0,
+                netPrice,
+                netTotal
+            }
+        };
+    }).filter(Boolean);
 }
 
 function parseSapPageItems(pageItems, pageWidth, pageNumber) {
