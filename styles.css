@@ -232,36 +232,37 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(237,85,44,
 .column-option:has(input:not(:checked)) { border-color: #b9c0c5; background: #eceeec; opacity: .7; }
 .column-option input { width: 15px; height: 15px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); box-shadow: none; }
 .column-option span { color: var(--ink-2); font-size: 11px; font-weight: 700; }
-.table-wrap { overflow-x: auto; border-top: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); }
-.editor-table { width: 100%; min-width: 1280px; border-collapse: collapse; table-layout: fixed; }
+.table-wrap { overflow-x: hidden; border-top: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); }
+.editor-table { width: 100%; min-width: 0; border-collapse: collapse; table-layout: fixed; }
 .editor-table th {
-    padding: 10px 8px;
+    padding: 8px 3px;
     color: #fff;
     border-right: 1px solid #56616b;
     background: var(--ink);
-    font-size: 10px;
-    letter-spacing: .03em;
+    font-size: 8.5px;
+    line-height: 1.2;
     text-align: left;
     text-transform: uppercase;
+    overflow-wrap: anywhere;
 }
-.editor-table td { padding: 5px; border-right: 1px solid #bec4c9; border-bottom: 1px solid #cfd4d8; vertical-align: top; }
+.editor-table td { padding: 3px; border-right: 1px solid #bec4c9; border-bottom: 1px solid #cfd4d8; vertical-align: top; }
 .editor-table tr:nth-child(even) td { background: #f6f6f4; }
 .editor-table tr:hover td { background: #fff7f3; }
-.editor-table input, .editor-table textarea { width: 100%; min-height: 34px; padding: 6px 7px; border: 1.25px solid transparent; border-radius: 3px; background: transparent; color: var(--ink); font-size: 11px; outline: none; }
-.editor-table textarea { min-height: 47px; resize: vertical; line-height: 1.35; }
+.editor-table input, .editor-table textarea { width: 100%; min-height: 32px; padding: 5px 3px; border: 1.25px solid transparent; border-radius: 3px; background: transparent; color: var(--ink); font-size: 10px; outline: none; }
+.editor-table textarea { min-height: 44px; resize: vertical; line-height: 1.35; }
 .editor-table input:hover, .editor-table textarea:hover { border-color: #89929a; background: #fff; }
 .editor-table input:focus, .editor-table textarea:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(237,85,44,.13); }
 .cell-number input { text-align: right; font-variant-numeric: tabular-nums; }
 .cell-center input { text-align: center; }
-.col-lp { width: 54px; text-align: center !important; }
-.col-name { width: 330px; }
-.col-index { width: 150px; }
-.col-qty { width: 75px; }
-.col-unit { width: 68px; }
-.col-money { width: 132px; text-align: right !important; }
-.col-discount { width: 82px; text-align: right !important; }
-.col-remove { width: 46px; }
-.remove-row { width: 32px; height: 32px; border: 1px solid #a84b43; border-radius: 4px; color: var(--danger); background: #fff; font-size: 17px; line-height: 1; }
+.col-lp { width: 34px; text-align: center !important; }
+.col-name { width: auto; }
+.col-index { width: 86px; }
+.col-qty { width: 42px; }
+.col-unit { width: 36px; }
+.col-money { width: 72px; text-align: right !important; }
+.col-discount { width: 48px; text-align: right !important; }
+.col-remove { width: 34px; }
+.remove-row { width: 28px; height: 28px; border: 1px solid #a84b43; border-radius: 4px; color: var(--danger); background: #fff; font-size: 16px; line-height: 1; }
 .empty-row td { padding: 38px; text-align: center; color: var(--muted); }
 .editor-footer { padding: 18px 22px; display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; }
 .source-note { display: flex; flex-direction: column; gap: 5px; }
