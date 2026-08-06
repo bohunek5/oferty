@@ -758,13 +758,14 @@ function parseSapPageItems(pageItems, pageWidth, pageNumber) {
     const rows = [];
 
     uniqueStarts.forEach((start, index) => {
+        const prevStart = uniqueStarts[index - 1];
         const nextStart = uniqueStarts[index + 1];
         const closestSummary = Math.max(
             28,
             ...stopYs.filter((y) => y < start.y)
         );
-        const bottomY = nextStart ? nextStart.y + 2 : closestSummary + 2;
-        const topY = start.y + Math.max(3, start.height * 0.4);
+        const topY = prevStart ? (prevStart.y + start.y) / 2 : headerY - 2;
+        const bottomY = nextStart ? (start.y + nextStart.y) / 2 : closestSummary + 2;
         const rowItems = pageItems.filter((item) =>
             item.y <= topY &&
             item.y > bottomY &&
