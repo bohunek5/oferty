@@ -681,14 +681,11 @@ function parseWaproPageItems(pageItems, pageWidth, pageNumber) {
         const unit = cleanCellText(joinCellItems(cells[3])) || 'szt.';
         const netPrice = parseNumber(joinCellItems(cells[4]));
         const netTotal = parseNumber(joinCellItems(cells[5]));
-        if (
-            !name ||
-            !Number.isFinite(qty) ||
-            !Number.isFinite(netPrice) ||
-            !Number.isFinite(netTotal)
-        ) {
+        if (!name || !Number.isFinite(qty)) {
             return null;
         }
+        netPrice = Number.isFinite(netPrice) ? netPrice : 0;
+        netTotal = Number.isFinite(netTotal) ? netTotal : roundMoney(qty * netPrice);
 
         return {
             id: nextItemId++,
@@ -1127,7 +1124,9 @@ function parseNumberedTablePageItems(pageItems, pageWidth, pageNumber) {
                 : netPrice;
         }
 
-        if (!name || !Number.isFinite(netPrice) || !Number.isFinite(netTotal)) return null;
+        if (!name) return null;
+        netPrice = Number.isFinite(netPrice) ? netPrice : 0;
+        netTotal = Number.isFinite(netTotal) ? netTotal : roundMoney(qty * netPrice);
         return {
             id: nextItemId++,
             position: anchor.value,
@@ -1216,9 +1215,11 @@ function parseKnownDocumentGridRows(rowContents, anchors, gridColumns, pageWidth
         if (!Number.isFinite(netTotal) && Number.isFinite(netPrice)) {
             netTotal = roundMoney(netPrice * qty);
         }
-        if (!cellText[1] || !Number.isFinite(netPrice) || !Number.isFinite(netTotal)) {
+        if (!cellText[1]) {
             return null;
         }
+        netPrice = Number.isFinite(netPrice) ? netPrice : 0;
+        netTotal = Number.isFinite(netTotal) ? netTotal : roundMoney(qty * netPrice);
         return {
             id: nextItemId++,
             position: anchors[rowIndex].value,
@@ -1307,14 +1308,11 @@ function parseFlexibleRowItems(rowItems, columns, boundaries, pageNumber, genera
         netTotal = roundMoney(qty * netPrice);
     }
 
-    if (
-        !Number.isFinite(position) ||
-        !name ||
-        !Number.isFinite(netPrice) ||
-        !Number.isFinite(netTotal)
-    ) {
+    if (!Number.isFinite(position) || !name) {
         return null;
     }
+    netPrice = Number.isFinite(netPrice) ? netPrice : 0;
+    netTotal = Number.isFinite(netTotal) ? netTotal : roundMoney(qty * netPrice);
 
     return {
         id: nextItemId++,
@@ -1357,15 +1355,11 @@ function parseRowItems(rowItems, tableLeft, tableWidth, pageNumber) {
     const netPrice = parseNumber(values[7]);
     const netTotal = parseNumber(values[8]);
 
-    if (
-        !Number.isFinite(position) ||
-        !name ||
-        !Number.isFinite(qty) ||
-        !Number.isFinite(netPrice) ||
-        !Number.isFinite(netTotal)
-    ) {
+    if (!Number.isFinite(position) || !name || !Number.isFinite(qty)) {
         return null;
     }
+    const safeNetPrice = Number.isFinite(netPrice) ? netPrice : 0;
+    const safeNetTotal = Number.isFinite(netTotal) ? netTotal : roundMoney(qty * safeNetPrice);
 
     return {
         id: nextItemId++,

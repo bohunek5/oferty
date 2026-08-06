@@ -258,13 +258,13 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(237,85,44,
 .editor-table input:focus, .editor-table textarea:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(237,85,44,.13); }
 .cell-number input { text-align: right; font-variant-numeric: tabular-nums; }
 .cell-center input { text-align: center; }
-.col-lp { width: 34px; text-align: center !important; }
-.col-name { width: auto; }
-.col-index { width: 86px; }
-.col-qty { width: 42px; }
-.col-unit { width: 36px; }
-.col-money { width: 72px; text-align: right !important; }
-.col-discount { width: 48px; text-align: right !important; }
+.col-lp { width: 38px; text-align: center !important; }
+.col-name { width: auto; min-width: 140px; }
+.col-index { width: 100px; }
+.col-qty { width: 55px; }
+.col-unit { width: 45px; }
+.col-money { width: 90px; text-align: right !important; }
+.col-discount { width: 60px; text-align: right !important; }
 .col-remove { width: 34px; }
 .remove-row { width: 28px; height: 28px; border: 1px solid #a84b43; border-radius: 4px; color: var(--danger); background: #fff; font-size: 16px; line-height: 1; }
 .empty-row td { padding: 38px; text-align: center; color: var(--muted); }
