@@ -679,8 +679,8 @@ function parseWaproPageItems(pageItems, pageWidth, pageNumber) {
         ));
         const qty = parseNumber(joinCellItems(cells[2]));
         const unit = cleanCellText(joinCellItems(cells[3])) || 'szt.';
-        const netPrice = parseNumber(joinCellItems(cells[4]));
-        const netTotal = parseNumber(joinCellItems(cells[5]));
+        let netPrice = parseNumber(joinCellItems(cells[4]));
+        let netTotal = parseNumber(joinCellItems(cells[5]));
         if (!name || !Number.isFinite(qty)) {
             return null;
         }
@@ -835,18 +835,23 @@ function parseFlexiblePageItems(pageItems, pageWidth, pageNumber) {
 
     const tableLeft = Math.max(0, layoutColumns[0].x - 5);
     const tableRight = pageWidth - tableLeft;
-    const boundaries = layoutColumns.slice(0, -1).map((column, index) =>
-        (column.x + layoutColumns[index + 1].x) / 2
-    );
+    const boundaries = layoutColumns.slice(0, -1).map((column, index) => {
+        const nextColumn = layoutColumns[index + 1];
+        const midpoint = (column.x + nextColumn.x) / 2;
+        if (column.key === 'position' && nextColumn.key === 'name') {
+            return Math.min(midpoint, column.right + 5);
+        }
+        return midpoint;
+    });
     const headerY = headerGroup.y;
     const stopYs = normalizedItems
         .filter((item) =>
-            /^(razem|suma|podsumowanie|total|wartoscslownie|doplaty)$/.test(item.normalized) ||
+            /^(razem|suma|podsumowanie|total|wartosc|wartoscslownie|netto|brutto|doplaty)$/.test(item.normalized) ||
             item.normalized.startsWith('wydrukowano') ||
             item.normalized.startsWith('strona')
         )
         .map((item) => item.y);
-    const tableBottom = Math.max(24, ...stopYs.filter((y) => y < headerY));
+    const tableBottom = Math.max(24, ...stopYs.filter((y) => y < headerY - 18));
     const headerBottomY = Math.min(
         headerY,
         ...normalizedItems
@@ -1428,6 +1433,7 @@ function cleanCellText(value) {
 function normalizeLabel(value) {
     return String(value || '')
         .normalize('NFD')
+        .replace(/[łŁ]/g, 'l')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]/gi, '')
         .toLowerCase();
