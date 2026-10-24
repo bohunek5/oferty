@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#e8e9e2">
+  <title>Dostęp do strony — PRESCOT</title>
+  <script src="./site-access.js?v=1"></script>
+  <link rel="stylesheet" href="./site-access.css?v=1">
+</head>
+<body>
+  <main>
+    <p class="brand">PRESCOT<span> LED</span></p>
+    <h1>Podaj hasło</h1>
+    <form>
+      <label for="site-password">Hasło dostępu</label>
+      <input id="site-password" name="password" type="password" autocomplete="current-password" required autofocus aria-describedby="access-status">
+      <button type="submit">Wejdź na stronę <span aria-hidden="true">→</span></button>
+      <p id="access-status" role="status" aria-live="polite"></p>
+    </form>
+    <noscript>Włącz JavaScript, aby wpisać hasło i otworzyć stronę.</noscript>
+  </main>
+</body>
+</html>
