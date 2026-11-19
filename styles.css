@@ -379,6 +379,23 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(237,85,44,
 .pdf-paper.is-blank-form .document-meta > div:not(.document-dates) p { visibility: hidden; }
 .pdf-paper.is-exporting { box-shadow: none; }
 
+.source-notes-panel { padding: 22px; }
+.source-notes-panel h2 { margin: 0 0 16px; font-size: 18px; }
+.source-notes-toggle { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.5; font-weight: 700; cursor: pointer; }
+.source-notes-toggle > span { font-size: 14px; }
+.source-notes-toggle input { width: 18px; height: 18px; margin: 2px 0 0; flex-shrink: 0; accent-color: var(--accent); }
+#sourceNotesEditor { margin-top: 18px; }
+#sourceNotesEditor label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 700; }
+#sourceNotesText { display: block; width: 100%; min-height: 160px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 7px; resize: vertical; font-size: 16px; line-height: 1.5; }
+#sourceNotesText:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+#sourceNotesStatus, #sourceNotesHelp { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.document-notes { margin-top: 5mm; padding: 4mm; border: 1px solid #aeb5bb; border-left: 3px solid var(--accent); border-radius: 2mm; background: #f8f8f8; color: var(--ink); font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
+.document-notes h2 { margin: 0 0 2.5mm; font-size: 11px; line-height: 1.4; break-after: avoid; }
+.document-notes p { margin: 0 0 2mm; white-space: pre-wrap; break-inside: avoid; orphans: 3; widows: 3; }
+.document-notes ul, .document-notes ol { margin: 0 0 2mm; padding-left: 5mm; }
+.document-notes li { margin-bottom: 1mm; white-space: pre-wrap; break-inside: avoid; orphans: 3; widows: 3; }
+.document-notes #docSourceNotesContent > :last-child { margin-bottom: 0; }
+
 @page { size: A4 portrait; margin: 0; }
 @media print {
     body { background: #fff; }

@@ -12,7 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
-    <link rel="stylesheet" href="styles.css?v=1.0.1">
+    <link rel="stylesheet" href="styles.css?v=1.0.4">
 </head>
 <body>
     <header class="app-header">
@@ -128,6 +128,21 @@
                     </label>
                 </div>
             </article>
+        </section>
+
+        <section class="panel source-notes-panel" aria-labelledby="sourceNotesHeading">
+            <h2 id="sourceNotesHeading">Uwagi do oferty</h2>
+            <label class="source-notes-toggle">
+                <input type="checkbox" id="includeSourceNotes" aria-controls="sourceNotesEditor">
+                <span>Przenieś uwagi / opis z dokumentu źródłowego</span>
+            </label>
+            <div id="sourceNotesEditor" hidden>
+                <p id="sourceNotesStatus" role="status"></p>
+                <label for="sourceNotesText">Treść ramki na dole oferty</label>
+                <textarea id="sourceNotesText" rows="7" placeholder="Uwagi, opis lub dodatkowe ustalenia…" aria-describedby="sourceNotesHelp"></textarea>
+                <p id="sourceNotesHelp">Możesz poprawić tekst. Puste wiersze oddzielają akapity; myślniki i numeracja tworzą listy. Pusta ramka nie pojawi się w PDF-ie.</p>
+                <button id="btnRestoreSourceNotes" class="button button-secondary" type="button" disabled>Przywróć uwagi ze źródła</button>
+            </div>
         </section>
 
         <section class="price-tools panel">
@@ -292,6 +307,11 @@
                         <p><strong>Warunki płatności:</strong> <span id="docPaymentTerms">Przelew 14 dni</span></p>
                     </div>
 
+                    <section id="docSourceNotes" class="document-notes" aria-labelledby="docSourceNotesHeading" hidden>
+                        <h2 id="docSourceNotesHeading">Uwagi / opis</h2>
+                        <div id="docSourceNotesContent"></div>
+                    </section>
+
                     <footer class="document-footer">
                         <div><strong>Prescot Sp. z o.o.</strong><span>Dziękujemy za zainteresowanie ofertą.</span></div>
                         <div class="signature"><span></span><small>Podpis i pieczęć</small></div>
@@ -307,6 +327,7 @@
         </div>
     </main>
 
-    <script src="app.js?v=1.0.3"></script>
+    <script src="source-notes.js?v=1.0.4"></script>
+    <script src="app.js?v=1.0.4"></script>
 </body>
 </html>

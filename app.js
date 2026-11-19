@@ -35,6 +35,9 @@ const state = {
     items: [],
     sourceFileName: '',
     sourcePageCount: 0,
+    sourceNotes: '',
+    notes: '',
+    includeSourceNotes: false,
     marginPercent: 0,
     vatPercent: 23,
     documentDataMode: 'filled',
@@ -69,6 +72,7 @@ function initializeForm() {
     syncDocumentColumnControls();
     syncDocumentDataMode();
     syncDocumentMeta();
+    syncSourceNotesControls();
 }
 
 function setupEventListeners() {
@@ -105,6 +109,19 @@ function setupEventListeners() {
     bindMetaInput('issueDate', 'issueDate');
     bindMetaInput('validityDate', 'validityDate');
     bindMetaInput('paymentTerms', 'paymentTerms');
+    document.getElementById('includeSourceNotes').addEventListener('change', (event) => {
+        state.includeSourceNotes = event.target.checked;
+        syncSourceNotesControls();
+    });
+    document.getElementById('sourceNotesText').addEventListener('input', (event) => {
+        state.notes = event.target.value;
+        renderSourceNotes();
+    });
+    document.getElementById('btnRestoreSourceNotes').addEventListener('click', () => {
+        if (state.notes !== state.sourceNotes && state.notes.trim() && !window.confirm('Zastąpić poprawioną treść uwagami odczytanymi z dokumentu?')) return;
+        state.notes = state.sourceNotes;
+        syncSourceNotesControls();
+    });
     document.querySelectorAll('input[name="documentDataMode"]').forEach((input) => {
         input.addEventListener('change', (event) => {
             if (!event.target.checked) return;
@@ -129,6 +146,7 @@ function setupEventListeners() {
         state.items = [];
         state.sourceFileName = '';
         state.sourcePageCount = 0;
+        resetSourceNotes();
         setImportStatus('idle', 'Tabela wyczyszczona', 'Możesz wgrać kolejny PDF.');
         updateCalculations();
     });
@@ -151,6 +169,48 @@ function bindMetaInput(elementId, key) {
         state.meta[key] = event.target.value;
         syncDocumentMeta();
     });
+}
+
+function resetSourceNotes() {
+    state.sourceNotes = '';
+    state.notes = '';
+    state.includeSourceNotes = false;
+    syncSourceNotesControls();
+}
+
+function syncSourceNotesControls() {
+    document.getElementById('includeSourceNotes').checked = state.includeSourceNotes;
+    document.getElementById('sourceNotesEditor').hidden = !state.includeSourceNotes;
+    document.getElementById('sourceNotesText').value = state.notes;
+    document.getElementById('btnRestoreSourceNotes').disabled = !state.sourceNotes;
+    document.getElementById('sourceNotesStatus').textContent = state.sourceNotes
+        ? 'Odczytano uwagi. Sprawdź treść przed dodaniem jej do oferty.'
+        : state.sourceFileName
+            ? 'Nie rozpoznano sekcji uwag lub opisu. Możesz wkleić jej treść poniżej.'
+            : 'Wgraj PDF, aby odczytać uwagi, albo wpisz je poniżej.';
+    renderSourceNotes();
+}
+
+function renderSourceNotes() {
+    const section = document.getElementById('docSourceNotes');
+    const content = document.getElementById('docSourceNotesContent');
+    section.hidden = !state.includeSourceNotes || !state.notes.trim();
+    content.replaceChildren();
+    if (!section.hidden) {
+        for (const block of window.OfferSourceNotes.blocks(state.notes)) {
+            const element = document.createElement(block.type === 'list' ? (block.ordered ? 'ol' : 'ul') : 'p');
+            if (block.type === 'list') {
+                for (const item of block.items) {
+                    const li = document.createElement('li');
+                    li.textContent = item.text;
+                    if (item.number !== null) li.value = item.number;
+                    element.append(li);
+                }
+            } else element.textContent = block.text;
+            content.append(element);
+        }
+    }
+    requestAnimationFrame(updatePreviewScale);
 }
 
 function syncDocumentMeta() {
@@ -228,6 +288,7 @@ async function handlePdfFile(file) {
         const extractedItems = [];
         const embeddedDataParts = [];
         const ocrCandidates = [];
+        const sourceTextPages = [];
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
             setParsingStatus(true, `Czytam stronę ${pageNumber} z ${pdf.numPages}…`);
@@ -246,6 +307,7 @@ async function handlePdfFile(file) {
             const pageEmbeddedParts = collectEmbeddedDataParts(allPageItems);
             embeddedDataParts.push(...pageEmbeddedParts);
             const pageItems = allPageItems.filter((item) => !isEmbeddedDataText(item.str));
+            sourceTextPages[pageNumber - 1] = pageItems;
 
             const parsedRows = parsePageItems(pageItems, viewport.width, pageNumber);
             if (!parsedRows.length && !pageEmbeddedParts.length) {
@@ -265,6 +327,7 @@ async function handlePdfFile(file) {
                     candidate.pageNumber,
                     pdf.numPages
                 );
+                sourceTextPages[candidate.pageNumber - 1] = ocrItems;
                 extractedItems.push(
                     ...parseOcrPageItems(
                         ocrItems,
@@ -286,6 +349,12 @@ async function handlePdfFile(file) {
         state.items = items;
         state.sourceFileName = file.name;
         state.sourcePageCount = pdf.numPages;
+        state.sourceNotes = embeddedPayload
+            ? (typeof embeddedPayload.notes === 'string' ? embeddedPayload.notes : '')
+            : window.OfferSourceNotes.extract(sourceTextPages);
+        state.notes = state.sourceNotes;
+        state.includeSourceNotes = Boolean(embeddedPayload?.includeSourceNotes && state.notes.trim());
+        syncSourceNotesControls();
         state.marginPercent = 0;
         document.getElementById('marginPercent').value = '0';
         if (embeddedPayload) restoreEmbeddedDocumentState(embeddedPayload);
@@ -1770,7 +1839,7 @@ async function generatePDF() {
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: {
             mode: ['css', 'legacy'],
-            avoid: ['tr', '.document-summary', '.document-terms']
+            avoid: ['tr', '.document-summary', '.document-terms', '.document-notes li', '.document-notes p']
         }
     };
 
@@ -1843,7 +1912,9 @@ function embedEditableOfferData(pdfDocument) {
         meta: { ...state.meta },
         vatPercent: state.vatPercent,
         documentDataMode: state.documentDataMode,
-        documentColumns: { ...state.documentColumns }
+        documentColumns: { ...state.documentColumns },
+        includeSourceNotes: state.includeSourceNotes && Boolean(state.notes.trim()),
+        notes: state.includeSourceNotes ? state.notes : ''
     };
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
     let binary = '';
