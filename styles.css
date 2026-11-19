@@ -379,11 +379,22 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(237,85,44,
 .pdf-paper.is-blank-form .document-meta > div:not(.document-dates) p { visibility: hidden; }
 .pdf-paper.is-exporting { box-shadow: none; }
 
-.source-notes-panel { padding: 22px; }
-.source-notes-panel h2 { margin: 0 0 16px; font-size: 18px; }
-.source-notes-toggle { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.5; font-weight: 700; cursor: pointer; }
+/* Match adjacent panels' spacing, including clearance for their 5px shadows. */
+.source-notes-panel { margin-top: 18px; padding: 22px; }
+.source-notes-panel h2 { margin: 0 0 8px; font-size: 18px; }
+.source-notes-toggle { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; min-height: 44px; font-size: 14px; line-height: 1.5; font-weight: 700; cursor: pointer; }
 .source-notes-toggle > span { font-size: 14px; }
-.source-notes-toggle input { width: 18px; height: 18px; margin: 2px 0 0; flex-shrink: 0; accent-color: var(--accent); }
+.source-notes-switch { position: relative; display: block; flex: 0 0 48px; width: 48px; height: 44px; }
+/* Isolate the switch hit area from the shared text-input height, padding and border. */
+.source-notes-switch input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; opacity: 0; cursor: pointer; }
+.source-notes-switch-track { position: absolute; top: 8px; left: 0; width: 48px; height: 28px; border: 1px solid #b3bdc5; border-radius: 999px; background: #dce1e5; transition: background-color .18s ease, border-color .18s ease; }
+.source-notes-switch-track::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(31,41,51,.25); transition: transform .18s ease; }
+.source-notes-switch input:checked + .source-notes-switch-track { border-color: var(--accent-dark); background: var(--accent); }
+.source-notes-switch input:checked + .source-notes-switch-track::after { transform: translateX(20px); }
+.source-notes-switch input:focus-visible + .source-notes-switch-track { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+    .source-notes-switch-track, .source-notes-switch-track::after { transition: none; }
+}
 #sourceNotesEditor { margin-top: 18px; }
 #sourceNotesEditor label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 700; }
 #sourceNotesText { display: block; width: 100%; min-height: 160px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 7px; resize: vertical; font-size: 16px; line-height: 1.5; }

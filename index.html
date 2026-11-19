@@ -12,7 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
-    <link rel="stylesheet" href="styles.css?v=1.0.4">
+    <link rel="stylesheet" href="styles.css?v=1.0.5">
 </head>
 <body>
     <header class="app-header">
@@ -133,8 +133,11 @@
         <section class="panel source-notes-panel" aria-labelledby="sourceNotesHeading">
             <h2 id="sourceNotesHeading">Uwagi do oferty</h2>
             <label class="source-notes-toggle">
-                <input type="checkbox" id="includeSourceNotes" aria-controls="sourceNotesEditor">
-                <span>Przenieś uwagi / opis z dokumentu źródłowego</span>
+                <span id="sourceNotesLabel">Przenieś uwagi / opis z dokumentu źródłowego</span>
+                <span class="source-notes-switch">
+                    <input type="checkbox" role="switch" id="includeSourceNotes" aria-labelledby="sourceNotesLabel" aria-controls="sourceNotesEditor">
+                    <span class="source-notes-switch-track" aria-hidden="true"></span>
+                </span>
             </label>
             <div id="sourceNotesEditor" hidden>
                 <p id="sourceNotesStatus" role="status"></p>
